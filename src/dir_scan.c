@@ -30,6 +30,7 @@
 #include <errno.h>
 
 #include <unistd.h>
+#include <fcntl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <dirent.h>
@@ -38,7 +39,7 @@
 #include <sys/attr.h>
 #endif
 
-#if HAVE_LINUX_MAGIC_H && HAVE_SYS_STATFS_H && HAVE_STATFS
+#if HAVE_LINUX_MAGIC_H && HAVE_SYS_STATFS_H && HAVE_FSTATFS
 #include <sys/statfs.h>
 #include <linux/magic.h>
 #endif
@@ -59,7 +60,7 @@ static struct dir    *buf_dir;
 static struct dir_ext buf_ext[1];
 
 
-#if HAVE_LINUX_MAGIC_H && HAVE_SYS_STATFS_H && HAVE_STATFS
+#if HAVE_LINUX_MAGIC_H && HAVE_SYS_STATFS_H && HAVE_FSTATFS
 int exclude_kernfs; /* Exclude Linux pseudo filesystems */
 
 static int is_kernfs(unsigned long type) {
@@ -138,112 +139,14 @@ static void stat_to_dir(struct stat *fs) {
 }
 
 
-/* Reads all filenames in the currently chdir'ed directory and stores it as a
- * nul-separated list of filenames. The list ends with an empty filename (i.e.
- * two nuls). . and .. are not included. Returned memory should be freed. *err
- * is set to 1 if some error occurred. Returns NULL if that error was fatal.
- * The reason for reading everything in memory first and then walking through
- * the list is to avoid eating too many file descriptors in a deeply recursive
- * directory. */
-static char *dir_read(int *err) {
-  DIR *dir;
-  struct dirent *item;
-  char *buf = NULL;
-  size_t buflen = 512;
-  size_t off = 0;
-
-  if((dir = opendir(".")) == NULL) {
-    *err = 1;
-    return NULL;
-  }
-
-  buf = xmalloc(buflen);
-  errno = 0;
-
-  while((item = readdir(dir)) != NULL) {
-    if(item->d_name[0] == '.' && (item->d_name[1] == 0 || (item->d_name[1] == '.' && item->d_name[2] == 0)))
-      continue;
-    size_t req = off+3+strlen(item->d_name);
-    if(req > buflen) {
-      buflen = req < buflen*2 ? buflen*2 : req;
-      buf = xrealloc(buf, buflen);
-    }
-    strcpy(buf+off, item->d_name);
-    off += strlen(item->d_name)+1;
-  }
-  if(errno)
-    *err = 1;
-  if(closedir(dir) < 0)
-    *err = 1;
-
-  buf[off] = 0;
-  buf[off+1] = 0;
-  return buf;
-}
-
-
-static int dir_walk(char *);
-
-
-/* Tries to recurse into the current directory item (buf_dir is assumed to be the current dir) */
-static int dir_scan_recurse(const char *name) {
-  int fail = 0;
-  char *dir;
-
-  if(chdir(name)) {
-    dir_setlasterr(dir_curpath);
-    buf_dir->flags |= FF_ERR;
-    if(dir_output.item(buf_dir, name, buf_ext) || dir_output.item(NULL, 0, NULL)) {
-      dir_seterr("Output error: %s", strerror(errno));
-      return 1;
-    }
-    return 0;
-  }
-
-  if((dir = dir_read(&fail)) == NULL) {
-    dir_setlasterr(dir_curpath);
-    buf_dir->flags |= FF_ERR;
-    if(dir_output.item(buf_dir, name, buf_ext) || dir_output.item(NULL, 0, NULL)) {
-      dir_seterr("Output error: %s", strerror(errno));
-      return 1;
-    }
-    if(chdir("..")) {
-      dir_seterr("Error going back to parent directory: %s", strerror(errno));
-      return 1;
-    } else
-      return 0;
-  }
-
-  /* readdir() failed halfway, not fatal. */
-  if(fail)
-    buf_dir->flags |= FF_ERR;
-
-  if(dir_output.item(buf_dir, name, buf_ext)) {
-    dir_seterr("Output error: %s", strerror(errno));
-    return 1;
-  }
-  fail = dir_walk(dir);
-  if(dir_output.item(NULL, 0, NULL)) {
-    dir_seterr("Output error: %s", strerror(errno));
-    return 1;
-  }
-
-  /* Not being able to chdir back is fatal */
-  if(!fail && chdir("..")) {
-    dir_seterr("Error going back to parent directory: %s", strerror(errno));
-    return 1;
-  }
-
-  return fail;
-}
+static int dir_walk(int);
 
 
 /* Scans and adds a single item. Recurses into dir_walk() again if this is a
- * directory. Assumes we're chdir'ed in the directory in which this item
- * resides. */
-static int dir_scan_item(const char *name) {
+ * directory. */
+static int dir_scan_item(int parfd, const char *name) {
   static struct stat st, stl;
-  int fail = 0;
+  int fail = 0, dirfd = -1;
 
 #ifdef __CYGWIN__
   /* /proc/registry names may contain slashes */
@@ -256,15 +159,20 @@ static int dir_scan_item(const char *name) {
   if(exclude_match(dir_curpath))
     buf_dir->flags |= FF_EXL;
 
-  if(!(buf_dir->flags & (FF_ERR|FF_EXL)) && lstat(name, &st)) {
+  if(!(buf_dir->flags & (FF_ERR|FF_EXL)) && fstatat(parfd, name, &st, AT_SYMLINK_NOFOLLOW)) {
     buf_dir->flags |= FF_ERR;
     dir_setlasterr(dir_curpath);
   }
 
-#if HAVE_LINUX_MAGIC_H && HAVE_SYS_STATFS_H && HAVE_STATFS
-  if(exclude_kernfs && !(buf_dir->flags & (FF_ERR|FF_EXL)) && S_ISDIR(st.st_mode)) {
+  if(!(buf_dir->flags & (FF_ERR|FF_EXL)) && S_ISDIR(st.st_mode) && (dirfd = openat(parfd, name, O_RDONLY|O_DIRECTORY)) < 0) {
+    buf_dir->flags |= FF_ERR;
+    dir_setlasterr(dir_curpath);
+  }
+
+#if HAVE_LINUX_MAGIC_H && HAVE_SYS_STATFS_H && HAVE_FSTATFS
+  if(exclude_kernfs && dirfd >= 0) {
     struct statfs fst;
-    if(statfs(name, &fst)) {
+    if(fstatfs(dirfd, &fst)) {
       buf_dir->flags |= FF_ERR;
       dir_setlasterr(dir_curpath);
     } else if(is_kernfs(fst.f_type))
@@ -272,7 +180,8 @@ static int dir_scan_item(const char *name) {
   }
 #endif
 
-#if HAVE_SYS_ATTR_H && HAVE_GETATTRLIST && HAVE_DECL_ATTR_CMNEXT_NOFIRMLINKPATH
+  /* TODO: Completely broken; prolly needs absolute path lookup */
+#if 0 && HAVE_SYS_ATTR_H && HAVE_GETATTRLIST && HAVE_DECL_ATTR_CMNEXT_NOFIRMLINKPATH
   if(!follow_firmlinks) {
     struct attrlist list = {
       .bitmapcount = ATTR_BIT_MAP_COUNT,
@@ -292,60 +201,79 @@ static int dir_scan_item(const char *name) {
 #endif
 
   if(!(buf_dir->flags & (FF_ERR|FF_EXL))) {
-    if(follow_symlinks && S_ISLNK(st.st_mode) && !stat(name, &stl) && !S_ISDIR(stl.st_mode))
+    if(follow_symlinks && S_ISLNK(st.st_mode) && !fstatat(parfd, name, &stl, 0) && !S_ISDIR(stl.st_mode))
       stat_to_dir(&stl);
     else
       stat_to_dir(&st);
   }
 
-  if(cachedir_tags && (buf_dir->flags & FF_DIR) && !(buf_dir->flags & (FF_ERR|FF_EXL|FF_OTHFS|FF_KERNFS|FF_FRMLNK)))
-    if(has_cachedir_tag(name)) {
+  if(cachedir_tags && dirfd >= 0 && !(buf_dir->flags & (FF_ERR|FF_EXL|FF_OTHFS|FF_KERNFS|FF_FRMLNK)))
+    if(has_cachedir_tag(dirfd)) {
       buf_dir->flags |= FF_EXL;
       buf_dir->size = buf_dir->asize = 0;
     }
 
-  /* Recurse into the dir or output the item */
-  if(buf_dir->flags & FF_DIR && !(buf_dir->flags & (FF_ERR|FF_EXL|FF_OTHFS|FF_KERNFS|FF_FRMLNK)))
-    fail = dir_scan_recurse(name);
-  else if(buf_dir->flags & FF_DIR) {
-    if(dir_output.item(buf_dir, name, buf_ext) || dir_output.item(NULL, 0, NULL)) {
-      dir_seterr("Output error: %s", strerror(errno));
-      fail = 1;
-    }
-  } else if(dir_output.item(buf_dir, name, buf_ext)) {
+  if(dir_output.item(buf_dir, name, buf_ext)) {
     dir_seterr("Output error: %s", strerror(errno));
     fail = 1;
   }
+
+  if(!fail && dirfd >= 0 && !(buf_dir->flags & (FF_ERR|FF_EXL|FF_OTHFS|FF_KERNFS|FF_FRMLNK))) {
+    /* XXX: Can't do anything with the return value, since we've already outputted our dir entry item.
+     * So errors reading dir items will be silently ignored. Not great. */
+    dir_walk(dirfd);
+    dirfd = -1;
+  }
+
+  if(!fail && (buf_dir->flags & FF_DIR) && dir_output.item(NULL, 0, NULL)) {
+    dir_seterr("Output error: %s", strerror(errno));
+    fail = 1;
+  }
+
+  if(dirfd >= 0)
+    close(dirfd);
 
   return fail || input_handle(1);
 }
 
 
-/* Walks through the directory that we're currently chdir'ed to. *dir contains
- * the filenames as returned by dir_read(), and will be freed automatically by
- * this function. */
-static int dir_walk(char *dir) {
+/* Recursively walks through the directory descriptor. Will close() the given dirfd. */
+static int dir_walk(int dirfd) {
   int fail = 0;
-  char *cur;
+  DIR *dir;
+  struct dirent *item;
 
-  fail = 0;
-  for(cur=dir; !fail&&cur&&*cur; cur+=strlen(cur)+1) {
-    dir_curpath_enter(cur);
+  /* Illegal behavior: We're giving dirfd to fdopendir(), which in turn takes
+   * control of the fd and we shouldn't be using it again. Yet we do use it
+   * later on for openat() calls. I doubt this will be a problem, but may need
+   * further testing. The alternative is to dup(), but that makes us run out of
+   * descriptors twice as fast... */
+  if((dir = fdopendir(dirfd)) == NULL) {
+    close(dirfd);
+    return -1;
+  }
+
+  while((item = readdir(dir)) != NULL) {
+    if(item->d_name[0] == '.' && (item->d_name[1] == 0 || (item->d_name[1] == '.' && item->d_name[2] == 0)))
+      continue;
+    dir_curpath_enter(item->d_name);
     memset(buf_dir, 0, offsetof(struct dir, name));
     memset(buf_ext, 0, sizeof(struct dir_ext));
-    fail = dir_scan_item(cur);
+    fail |= dir_scan_item(dirfd, item->d_name);
     dir_curpath_leave();
   }
 
-  free(dir);
+  if(errno)
+    fail = 1;
+  if(closedir(dir) < 0)
+    fail = 1;
   return fail;
 }
 
 
 static int process(void) {
   char *path;
-  char *dir;
-  int fail = 0;
+  int fail = 0, dirfd = -1;
   struct stat fs;
 
   memset(buf_dir, 0, offsetof(struct dir, name));
@@ -361,14 +289,11 @@ static int process(void) {
   if(!dir_fatalerr && path_chdir(dir_curpath) < 0)
     dir_seterr("Error changing directory: %s", strerror(errno));
 
-  /* Can these even fail after a chdir? */
-  if(!dir_fatalerr && lstat(".", &fs) != 0)
-    dir_seterr("Error obtaining directory information: %s", strerror(errno));
-  if(!dir_fatalerr && !S_ISDIR(fs.st_mode))
-    dir_seterr("Not a directory");
-
-  if(!dir_fatalerr && !(dir = dir_read(&fail)))
+  if(!dir_fatalerr && (dirfd = open(".", O_RDONLY|O_DIRECTORY)) < 0)
     dir_seterr("Error reading directory: %s", strerror(errno));
+
+  if(!dir_fatalerr && fstat(dirfd, &fs) != 0)
+    dir_seterr("Error obtaining directory information: %s", strerror(errno));
 
   if(!dir_fatalerr) {
     curdev = (uint64_t)fs.st_dev;
@@ -380,13 +305,18 @@ static int process(void) {
       dir_seterr("Output error: %s", strerror(errno));
       fail = 1;
     }
-    if(!fail)
-      fail = dir_walk(dir);
+    if(!fail) {
+      fail = dir_walk(dirfd);
+      dirfd = -1;
+    }
     if(!fail && dir_output.item(NULL, 0, NULL)) {
       dir_seterr("Output error: %s", strerror(errno));
       fail = 1;
     }
   }
+
+  if(dirfd >= 0)
+      close(dirfd);
 
   while(dir_fatalerr && !input_handle(0))
     ;

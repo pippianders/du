@@ -170,7 +170,7 @@ static void argv_parse(int argc, char **argv) {
       printf("  -X, --exclude-from FILE    Exclude files that match any pattern in FILE\n");
       printf("  -L, --follow-symlinks      Follow symbolic links (excluding directories)\n");
       printf("  --exclude-caches           Exclude directories containing CACHEDIR.TAG\n");
-#if HAVE_LINUX_MAGIC_H && HAVE_SYS_STATFS_H && HAVE_STATFS
+#if HAVE_LINUX_MAGIC_H && HAVE_SYS_STATFS_H && HAVE_FSTATFS
       printf("  --exclude-kernfs           Exclude Linux pseudo filesystems (procfs,sysfs,cgroup,...)\n");
 #endif
 #if HAVE_SYS_ATTR_H && HAVE_GETATTRLIST && HAVE_DECL_ATTR_CMNEXT_NOFIRMLINKPATH
@@ -206,7 +206,7 @@ static void argv_parse(int argc, char **argv) {
       break;
 
     case  2 : /* --exclude-kernfs */
-#if HAVE_LINUX_MAGIC_H && HAVE_SYS_STATFS_H && HAVE_STATFS
+#if HAVE_LINUX_MAGIC_H && HAVE_SYS_STATFS_H && HAVE_FSTATFS
       exclude_kernfs = 1; break;
 #else
       fprintf(stderr, "This feature is not supported on your platform\n");

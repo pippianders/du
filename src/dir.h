@@ -113,7 +113,7 @@ void dir_scan_init(const char *path);
 extern int dir_import_active;
 int dir_import_init(const char *fn);
 
-#if HAVE_LINUX_MAGIC_H && HAVE_SYS_STATFS_H && HAVE_STATFS
+#if HAVE_LINUX_MAGIC_H && HAVE_SYS_STATFS_H && HAVE_FSTATFS
 extern int exclude_kernfs;
 #endif
 

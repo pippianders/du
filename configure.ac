@@ -28,7 +28,7 @@ AC_CHECK_FUNCS(
   [getcwd gettimeofday fnmatch chdir rmdir unlink lstat system getenv],[],
   AC_MSG_ERROR([required function missing]))
 
-AC_CHECK_FUNCS(statfs)
+AC_CHECK_FUNCS(fstatfs)
 
 AC_CHECK_HEADERS([sys/attr.h])
 

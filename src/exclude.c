@@ -29,6 +29,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <fnmatch.h>
+#include <unistd.h>
+#include <fcntl.h>
 
 
 static struct exclude {
@@ -105,35 +107,17 @@ void exclude_clear() {
  * Exclusion of directories that contain only cached information.
  * See http://www.brynosaurus.com/cachedir/
  */
-#define CACHEDIR_TAG_FILENAME "CACHEDIR.TAG"
 #define CACHEDIR_TAG_SIGNATURE "Signature: 8a477f597d28d172789f06886806bc55"
 
-int has_cachedir_tag(const char *name) {
-  static int path_l = 1024;
-  static char *path = NULL;
-  int l;
+int has_cachedir_tag(int dirfd) {
+  int fd = -1, match = 0;
   char buf[sizeof CACHEDIR_TAG_SIGNATURE - 1];
-  FILE *f;
-  int match = 0;
 
-  /* Compute the required length for `path`. */
-  l = strlen(name) + sizeof CACHEDIR_TAG_FILENAME + 2;
-  if(l > path_l || path == NULL) {
-    path_l = path_l * 2;
-    if(path_l < l)
-      path_l = l;
-    /* We don't need to copy the content of `path`, so it's more efficient to
-     * use `free` + `malloc`. */
-    free(path);
-    path = xmalloc(path_l);
-  }
-  snprintf(path, path_l, "%s/%s", name, CACHEDIR_TAG_FILENAME);
-  f = fopen(path, "rb");
-
-  if(f != NULL) {
-    match = ((fread(buf, 1, sizeof buf, f) == sizeof buf) &&
-                !memcmp(buf, CACHEDIR_TAG_SIGNATURE, sizeof buf));
-    fclose(f);
-  }
+  /* Assumption: We won't get a short read() when fetching the tag. */
+  match = (fd = openat(dirfd, "CACHEDIR.TAG", O_RDONLY)) >= 0
+       && read(fd, buf, sizeof buf) == sizeof buf
+       && !memcmp(buf, CACHEDIR_TAG_SIGNATURE, sizeof buf);
+  if(fd >= 0)
+    close(fd);
   return match;
 }
