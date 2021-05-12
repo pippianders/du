@@ -34,6 +34,22 @@
 #include <unistd.h>
 #include <sys/wait.h>
 
+static void set_level(void) {
+  static int done = 0;
+  char nlvl[2];
+  if(done)
+    return;
+  const char *lvl = getenv("NCDU_LEVEL");
+  // too lazy to count beyond 9
+  if(lvl && *lvl >= '1' && *lvl < '9' && lvl[1] == 0) {
+    nlvl[0] = 1 + *lvl;
+    nlvl[1] = 0;
+    setenv("NCDU_LEVEL", nlvl, 1);
+  } else
+    setenv("NCDU_LEVEL", "1", 1);
+  done++;
+}
+
 void shell_draw() {
   const char *full_path;
   int res;
@@ -59,6 +75,7 @@ void shell_draw() {
         shell = DEFAULT_SHELL;
     }
 
+    set_level();
     res = system(shell);
 
     /* resume ncurses mode */
