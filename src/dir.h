@@ -69,7 +69,7 @@ struct dir_output {
    * The function should return non-zero on error, at which point errno is
    * assumed to be set to something sensible.
    */
-  int (*item)(struct dir *, const char *, struct dir_ext *);
+  int (*item)(struct dir *, const char *, struct dir_ext *, unsigned int);
 
   /* Finalizes the output to go to the next program state or exit ncdu. Called
    * after item(NULL) has been called for the root item or before any item()

@@ -72,6 +72,7 @@ static struct ctx {
   /* scratch space */
   struct dir    *buf_dir;
   struct dir_ext buf_ext[1];
+  unsigned int nlink;
 
   char buf_name[MAX_VAL];
   char val[MAX_VAL];
@@ -421,7 +422,7 @@ static int itemdir(uint64_t dev) {
 
 
 /* Reads a JSON object representing a struct dir/dir_ext item. Writes to
- * ctx->buf_dir, ctx->buf_ext and ctx->buf_name. */
+ * ctx->buf_dir, ctx->buf_ext, ctx->buf_name and ctx->nlink. */
 static int iteminfo(void) {
   uint64_t iv;
 
@@ -470,6 +471,11 @@ static int iteminfo(void) {
         ctx->buf_dir->flags |= FF_HLNKC;
       } else
         C(rlit("false", 5));
+    } else if(strcmp(ctx->val, "nlink") == 0) {      /* nlink */
+      C(rint64(&iv, UINT32_MAX));
+      if(iv > 1)
+        ctx->buf_dir->flags |= FF_HLNKC;
+      ctx->nlink = iv;
     } else if(strcmp(ctx->val, "read_error") == 0) { /* read_error */
       if(*ctx->buf == 't') {
         C(rlit("true", 4));
@@ -526,6 +532,7 @@ static int item(uint64_t dev) {
 
   memset(ctx->buf_dir, 0, offsetof(struct dir, name));
   memset(ctx->buf_ext, 0, sizeof(struct dir_ext));
+  ctx->nlink = 0;
   *ctx->buf_name = 0;
   ctx->buf_dir->flags |= isdir ? FF_DIR : FF_FILE;
   ctx->buf_dir->dev = dev;
@@ -539,16 +546,16 @@ static int item(uint64_t dev) {
     dir_curpath_enter(ctx->buf_name);
 
   if(isdir) {
-    if(dir_output.item(ctx->buf_dir, ctx->buf_name, ctx->buf_ext)) {
+    if(dir_output.item(ctx->buf_dir, ctx->buf_name, ctx->buf_ext, ctx->nlink)) {
       dir_seterr("Output error: %s", strerror(errno));
       return 1;
     }
     C(itemdir(dev));
-    if(dir_output.item(NULL, 0, NULL)) {
+    if(dir_output.item(NULL, 0, NULL, 0)) {
       dir_seterr("Output error: %s", strerror(errno));
       return 1;
     }
-  } else if(dir_output.item(ctx->buf_dir, ctx->buf_name, ctx->buf_ext)) {
+  } else if(dir_output.item(ctx->buf_dir, ctx->buf_name, ctx->buf_ext, ctx->nlink)) {
     dir_seterr("Output error: %s", strerror(errno));
     return 1;
   }

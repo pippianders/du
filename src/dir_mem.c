@@ -109,8 +109,9 @@ static void item_add(struct dir *item) {
 }
 
 
-static int item(struct dir *dir, const char *name, struct dir_ext *ext) {
+static int item(struct dir *dir, const char *name, struct dir_ext *ext, unsigned int nlink) {
   struct dir *t, *item;
+  (void)nlink;
 
   /* Go back to parent dir */
   if(!dir) {

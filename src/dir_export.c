@@ -74,7 +74,7 @@ static void output_int(uint64_t n) {
 }
 
 
-static void output_info(struct dir *d, const char *name, struct dir_ext *e) {
+static void output_info(struct dir *d, const char *name, struct dir_ext *e, unsigned int nlink) {
   if(!extended_info || !(d->flags & FF_EXT))
     e = NULL;
 
@@ -96,8 +96,6 @@ static void output_info(struct dir *d, const char *name, struct dir_ext *e) {
     fputs(",\"dev\":", stream);
     output_int(d->dev);
   }
-  fputs(",\"ino\":", stream);
-  output_int(d->ino);
 
   if(e) {
     fputs(",\"uid\":", stream);
@@ -111,8 +109,12 @@ static void output_info(struct dir *d, const char *name, struct dir_ext *e) {
   }
 
   /* TODO: Including the actual number of links would be nicer. */
-  if(d->flags & FF_HLNKC)
-    fputs(",\"hlnkc\":true", stream);
+  if(d->flags & FF_HLNKC) {
+    fputs(",\"ino\":", stream);
+    output_int(d->ino);
+    fputs(",\"hlnkc\":true,\"nlink\":", stream);
+    output_int(nlink);
+  }
   if(d->flags & FF_ERR)
     fputs(",\"read_error\":true", stream);
   /* excluded/error'd files are "unknown" with respect to the "notreg" field. */
@@ -136,7 +138,7 @@ static void output_info(struct dir *d, const char *name, struct dir_ext *e) {
  * item() call do we check for ferror(). This greatly simplifies the code, but
  * assumes that calls to fwrite()/fput./etc don't do any weird stuff when
  * called with a stream that's in an error state. */
-static int item(struct dir *item, const char *name, struct dir_ext *ext) {
+static int item(struct dir *item, const char *name, struct dir_ext *ext, unsigned int nlink) {
   if(!item) {
     nstack_pop(&stack);
     if(!stack.top) { /* closing of the root item */
@@ -152,7 +154,7 @@ static int item(struct dir *item, const char *name, struct dir_ext *ext) {
   /* File header.
    * TODO: Add scan options? */
   if(!stack.top) {
-    fputs("[1,1,{\"progname\":\""PACKAGE"\",\"progver\":\""PACKAGE_VERSION"\",\"timestamp\":", stream);
+    fputs("[1,2,{\"progname\":\""PACKAGE"\",\"progver\":\""PACKAGE_VERSION"\",\"timestamp\":", stream);
     output_int((uint64_t)time(NULL));
     fputc('}', stream);
   }
@@ -161,7 +163,7 @@ static int item(struct dir *item, const char *name, struct dir_ext *ext) {
   if(item->flags & FF_DIR)
     fputc('[', stream);
 
-  output_info(item, name, ext);
+  output_info(item, name, ext, nlink);
 
   if(item->flags & FF_DIR)
     nstack_push(&stack, item->dev);
