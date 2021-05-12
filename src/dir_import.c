@@ -568,8 +568,14 @@ static int item(uint64_t dev) {
 
 
 static int footer(void) {
-  C(cons());
-  E(*ctx->buf != ']', "Expected ']'");
+  while(1) {
+    C(cons());
+    if(*ctx->buf == ']')
+      break;
+    E(*ctx->buf != ',', "Expected ',' or ']'");
+    con(1);
+    C(cons() || rval());
+  }
   con(1);
   C(cons());
   E(*ctx->buf, "Trailing garbage");
