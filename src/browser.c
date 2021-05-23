@@ -160,7 +160,7 @@ static void browse_draw_graph(struct dir *n, int *x) {
   /* graph (10+ columns) */
   if(graph == 1 || graph == 3) {
     uic_set(c == UIC_SEL ? UIC_GRAPH_SEL : UIC_GRAPH);
-    o = (int)((float)bar_size*(float)(show_as ? n->asize : n->size) / (float)(show_as ? dirlist_maxa : dirlist_maxs));
+    o = (int)((float)bar_size*((float)(show_as ? n->asize : n->size) / (float)(show_as ? dirlist_maxa : dirlist_maxs)));
     for(i=0; i<bar_size; i++)
       addch(i < o ? '#' : ' ');
   }
