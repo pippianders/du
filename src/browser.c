@@ -288,9 +288,13 @@ void browse_draw() {
   uic_set(UIC_HD);
   mvhline(winrows-1, 0, ' ', wincols);
   if(t) {
+    if(!show_as) attron(A_BOLD);
     mvaddstr(winrows-1, 0, " Total disk usage: ");
+    if(!show_as) attroff(A_BOLD);
     printsize(UIC_HD, t->parent->size);
+    if(show_as) attron(A_BOLD);
     addstrc(UIC_HD, "  Apparent size: ");
+    if(show_as) attroff(A_BOLD);
     uic_set(UIC_NUM_HD);
     printsize(UIC_HD, t->parent->asize);
     addstrc(UIC_HD, "  Items: ");
