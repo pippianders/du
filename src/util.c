@@ -134,13 +134,13 @@ char *fmtmode(unsigned short mode) {
          : ft == S_IFBLK  ? 'b' : '?';
   buf[1] = mode & 0400 ? 'r' : '-';
   buf[2] = mode & 0200 ? 'w' : '-';
-  buf[3] = mode & 0100 ? 'x' : '-';
+  buf[3] = mode &04000 ? 's' : mode & 0100 ? 'x' : '-';
   buf[4] = mode & 0040 ? 'r' : '-';
   buf[5] = mode & 0020 ? 'w' : '-';
-  buf[6] = mode & 0010 ? 'x' : '-';
+  buf[6] = mode &02000 ? 's' : mode & 0010 ? 'x' : '-';
   buf[7] = mode & 0004 ? 'r' : '-';
   buf[8] = mode & 0002 ? 'w' : '-';
-  buf[9] = mode & 0001 ? 'x' : '-';
+  buf[9] = mode &01000 ? (S_ISDIR(mode) ? 't' : 'T') : mode & 0001 ? 'x' : '-';
   buf[10] = 0;
   return buf;
 }
