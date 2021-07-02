@@ -12,7 +12,7 @@
 #   where $arch = 'arm', 'i486' or 'x86_64'
 
 MUSL_CROSS_PATH=/opt/cross
-NCURSES_VERSION=6.0
+NCURSES_VERSION=6.2
 
 export CFLAGS="-O3 -g -static"
 

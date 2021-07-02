@@ -434,8 +434,8 @@ anything can happen.
 
 On macOS 10.15 and later, running ncdu on the root directory without
 `--exclude-firmlinks` may cause directories to be scanned and counted multiple
-times. Firmlink cycles are currently (1.15.1) not detected, so it may also
-cause ncdu to get stuck in an infinite loop and eventually run out of memory.
+times. Firmlink cycles are currently (1.16) not detected, so it may also cause
+ncdu to get stuck in an infinite loop and eventually run out of memory.
 
 Please report any other bugs you may find at the bug tracker, which can be
 found on the web site at https://dev.yorhel.nl/ncdu
