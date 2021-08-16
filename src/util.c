@@ -250,10 +250,16 @@ static const struct {
   short fg, bg;
   int attr;
 } color_defs[] = {
-#define C(name, off_fg, off_bg, off_a, dark_fg, dark_bg, dark_a) \
-  {off_fg,  off_bg,  off_a}, \
-  {dark_fg, dark_bg, dark_a},
+#define COLOR__ -1
+#define B A_BOLD
+#define R A_REVERSE
+#define C(name, off_fg, off_bg, off_a, dark_fg, dark_bg, dark_a, darkbg_fg, darkbg_bg, darkbg_a) \
+  {COLOR_##off_fg,    COLOR_##off_bg,    off_a}, \
+  {COLOR_##dark_fg,   COLOR_##dark_bg,   dark_a}, \
+  {COLOR_##darkbg_fg, COLOR_##darkbg_bg, darkbg_a},
   UI_COLORS
+#undef B
+#undef R
 #undef C
   {0,0,0}
 };
@@ -264,7 +270,7 @@ void uic_init() {
   start_color();
   use_default_colors();
   for(i=0; i<sizeof(colors)/sizeof(*colors)-1; i++) {
-    j = i*2 + uic_theme;
+    j = i*3 + uic_theme;
     init_pair(i+1, color_defs[j].fg, color_defs[j].bg);
     colors[i] = color_defs[j].attr | COLOR_PAIR(i+1);
   }

@@ -31,24 +31,23 @@
 
 
 /* UI colors: (foreground, background, attrs)
- *  NAME         OFF                        DARK
- */
+ *  NAME         OFF         DARK                DARK-BG   */
 #define UI_COLORS \
-  C(DEFAULT,     -1,-1,0               ,    -1,           -1,         0     )\
-  C(BOX_TITLE,   -1,-1,A_BOLD          ,    COLOR_BLUE,   -1,         A_BOLD)\
-  C(HD,          -1,-1,A_REVERSE       ,    COLOR_BLACK,  COLOR_CYAN, 0     )    /* header & footer */\
-  C(SEL,         -1,-1,A_REVERSE       ,    COLOR_WHITE,  COLOR_GREEN,A_BOLD)\
-  C(NUM,         -1,-1,0               ,    COLOR_YELLOW, -1,         A_BOLD)\
-  C(NUM_HD,      -1,-1,A_REVERSE       ,    COLOR_YELLOW, COLOR_CYAN, A_BOLD)\
-  C(NUM_SEL,     -1,-1,A_REVERSE       ,    COLOR_YELLOW, COLOR_GREEN,A_BOLD)\
-  C(KEY,         -1,-1,A_BOLD          ,    COLOR_YELLOW, -1,         A_BOLD)\
-  C(KEY_HD,      -1,-1,A_BOLD|A_REVERSE,    COLOR_YELLOW, COLOR_CYAN, A_BOLD)\
-  C(DIR,         -1,-1,0               ,    COLOR_BLUE,   -1,         A_BOLD)\
-  C(DIR_SEL,     -1,-1,A_REVERSE       ,    COLOR_BLUE,   COLOR_GREEN,A_BOLD)\
-  C(FLAG,        -1,-1,0               ,    COLOR_RED,    -1,         0     )\
-  C(FLAG_SEL,    -1,-1,A_REVERSE       ,    COLOR_RED,    COLOR_GREEN,0     )\
-  C(GRAPH,       -1,-1,0               ,    COLOR_MAGENTA,-1,         0     )\
-  C(GRAPH_SEL,   -1,-1,A_REVERSE       ,    COLOR_MAGENTA,COLOR_GREEN,0     )
+  C(DEFAULT,     _,_,0  ,    _,      _,    0,    WHITE,  BLACK,0)\
+  C(BOX_TITLE,   _,_,B  ,    BLUE,   _,    B,    BLUE,   BLACK,B)\
+  C(HD,          _,_,R  ,    BLACK,  CYAN, 0,    BLACK,  CYAN, 0)    /* header & footer */\
+  C(SEL,         _,_,R  ,    WHITE,  GREEN,B,    WHITE,  GREEN,B)\
+  C(NUM,         _,_,0  ,    YELLOW, _,    B,    YELLOW, BLACK,B)\
+  C(NUM_HD,      _,_,R  ,    YELLOW, CYAN, B,    YELLOW, CYAN, B)\
+  C(NUM_SEL,     _,_,R  ,    YELLOW, GREEN,B,    YELLOW, GREEN,B)\
+  C(KEY,         _,_,B  ,    YELLOW, _,    B,    YELLOW, BLACK,B)\
+  C(KEY_HD,      _,_,B|R,    YELLOW, CYAN, B,    YELLOW, CYAN, B)\
+  C(DIR,         _,_,0  ,    BLUE,   _,    B,    BLUE,   BLACK,B)\
+  C(DIR_SEL,     _,_,R  ,    BLUE,   GREEN,B,    BLUE,   GREEN,B)\
+  C(FLAG,        _,_,0  ,    RED,    _,    0,    RED,    BLACK,0)\
+  C(FLAG_SEL,    _,_,R  ,    RED,    GREEN,0,    RED,    GREEN,0)\
+  C(GRAPH,       _,_,0  ,    MAGENTA,_,    0,    MAGENTA,BLACK,0)\
+  C(GRAPH_SEL,   _,_,R  ,    MAGENTA,GREEN,0,    MAGENTA,GREEN,0)
 
 enum ui_coltype {
 #define C(name, ...) UIC_##name,

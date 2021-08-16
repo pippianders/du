@@ -122,6 +122,8 @@ static void argv_parse(int argc, char **argv) {
   char *import = NULL;
   char *dir = NULL;
 
+  uic_theme = getenv("NO_COLOR") ? 0 : 2;
+
   static yopt_opt_t opts[] = {
     { 'h', 0, "-h,-?,--help" },
     { 'q', 0, "-q" },
@@ -177,7 +179,7 @@ static void argv_parse(int argc, char **argv) {
       printf("  --exclude-firmlinks        Exclude firmlinks on macOS\n");
 #endif
       printf("  --confirm-quit             Confirm quitting ncdu\n");
-      printf("  --color SCHEME             Set color scheme (off/dark)\n");
+      printf("  --color SCHEME             Set color scheme (off/dark/dark-bg)\n");
       exit(0);
     case 'q': update_delay = 2000; break;
     case 'v':
@@ -229,6 +231,7 @@ static void argv_parse(int argc, char **argv) {
     case 'c':
       if(strcmp(val, "off") == 0)  { uic_theme = 0; }
       else if(strcmp(val, "dark") == 0) { uic_theme = 1; }
+      else if(strcmp(val, "dark-bg") == 0) { uic_theme = 2; }
       else {
         fprintf(stderr, "Unknown --color option: %s\n", val);
         exit(1);
