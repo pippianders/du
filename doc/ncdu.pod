@@ -20,15 +20,15 @@ provides a fast way to see what directories are using your disk space.
 
 =over
 
-=item -h, --help
+=item B<-h>, B<--help>
 
 Print a short help message and quit.
 
-=item -v, -V, --version
+=item B<-v>, B<-V>, B<--version>
 
 Print ncdu version and quit.
 
-=item -f I<FILE>
+=item B<-f> I<FILE>
 
 Load the given file, which has earlier been created with the C<-o> option. If
 I<FILE> is equivalent to C<->, the file is read from standard input.
@@ -42,7 +42,7 @@ deletion and shell spawning options in the browser will be disabled.
 
 Scan the given directory.
 
-=item -o I<FILE>
+=item B<-o> I<FILE>
 
 Export all necessary information to I<FILE> instead of opening the browser
 interface. If I<FILE> is C<->, the data is written to standard output.  See the
@@ -54,7 +54,7 @@ directory with many files. 10.000 files will get you an export in the order of
 gzip. This scales linearly, so be prepared to handle a few tens of megabytes
 when dealing with millions of files.
 
-=item -e
+=item B<-e>
 
 Enable extended information mode. This will, in addition to the usual file
 information, also read the ownership, permissions and last modification time
@@ -76,7 +76,7 @@ using 'm' and 'M', respectively.
 
 =over
 
-=item -0
+=item B<-0>
 
 Don't give any feedback while scanning a directory or importing a file, other
 than when a fatal error occurs. Ncurses will not be initialized until the scan
@@ -84,7 +84,7 @@ is complete. When exporting the data with C<-o>, ncurses will not be
 initialized at all. This option is the default when exporting to standard
 output.
 
-=item -1
+=item B<-1>
 
 Similar to C<-0>, but does give feedback on the scanning progress with a single
 line of output. This option is the default when exporting to a file.
@@ -93,20 +93,20 @@ In some cases, the ncurses browser interface which you'll see after the
 scan/import is complete may look garbled when using this option. If you're not
 exporting to a file, C<-2> is probably a better choice.
 
-=item -2
+=item B<-2>
 
 Provide a full-screen ncurses interface while scanning a directory or importing
 a file. This is the only interface that provides feedback on any non-fatal
 errors while scanning.
 
-=item -q
+=item B<-q>
 
 Quiet mode. While scanning or importing the directory, ncdu will update the
 screen 10 times a second by default, this will be decreased to once every 2
 seconds in quiet mode. Use this feature to save bandwidth over remote
 connections. This option has no effect when C<-0> is used.
 
-=item -r
+=item B<-r>
 
 Read-only mode. This will disable the built-in file deletion feature. This
 option has no effect when C<-o> is used, because there will not be a browser
@@ -118,23 +118,23 @@ still possible to spawn a shell from ncdu and delete or modify files from
 there. To disable that feature as well, pass the C<-r> option twice (see
 C<-rr>).
 
-=item -rr
+=item B<-rr>
 
 In addition to C<-r>, this will also disable the shell spawning feature of the
 file browser.
 
-=item --si
+=item B<--si>
 
 List sizes using base 10 prefixes, that is, powers of 1000 (KB, MB, etc), as
 defined in the International System of Units (SI), instead of the usual base 2
 prefixes, that is, powers of 1024 (KiB, MiB, etc).
 
-=item --confirm-quit
+=item B<--confirm-quit>
 
 Requires a confirmation before quitting ncdu. Very helpful when you
 accidentally press 'q' during or after a very long scan.
 
-=item --color I<SCHEME>
+=item B<--color> I<SCHEME>
 
 Select a color scheme. The following schemes are recognized: I<off> to disable
 colors, I<dark> for a color scheme intended for dark backgrounds and I<dark-bg>
@@ -152,41 +152,41 @@ directory information from a file.
 
 =over
 
-=item -x
+=item B<-x>
 
 Do not cross filesystem boundaries, i.e. only count files and directories on
 the same filesystem as the directory being scanned.
 
-=item --exclude I<PATTERN>
+=item B<--exclude> I<PATTERN>
 
 Exclude files that match I<PATTERN>. The files will still be displayed by
 default, but are not counted towards the disk usage statistics. This argument
 can be added multiple times to add more patterns.
 
-=item -X I<FILE>, --exclude-from I<FILE>
+=item B<-X> I<FILE>, B<--exclude-from> I<FILE>
 
 Exclude files that match any pattern in I<FILE>. Patterns should be separated
 by a newline.
 
-=item --exclude-caches
+=item B<--exclude-caches>
 
 Exclude directories containing CACHEDIR.TAG.  The directories will still be
 displayed, but not their content, and they are not counted towards the disk
 usage statistics.
 See http://www.brynosaurus.com/cachedir/
 
-=item -L, --follow-symlinks
+=item B<-L>, B<--follow-symlinks>
 
 Follow symlinks and count the size of the file they point to. As of ncdu 1.14,
 this option will not follow symlinks to directories and will count each
 symlinked file as a unique file (i.e. unlike how hard links are handled). This
 is subject to change in later versions.
 
-=item --exclude-firmlinks
+=item B<--exclude-firmlinks>
 
 (MacOS only) Exclude firmlinks.
 
-=item --exclude-kernfs
+=item B<--exclude-kernfs>
 
 (Linux only) Exclude Linux pseudo filesystems, e.g. /proc (procfs), /sys (sysfs).
 
@@ -200,68 +200,68 @@ cgroup2, debug, devpts, proc, pstore, security, selinux, sys, trace.
 
 =over
 
-=item ?
+=item B<?>
 
 Show help + keys + about screen
 
-=item up, down j, k
+=item B<up>, B<down>, B<j>, B<k>
 
 Cycle through the items
 
-=item right, enter, l
+=item B<right>, B<enter>, B<l>
 
 Open selected directory
 
-=item left, <, h
+=item B<left>, B<<>, B<h>
 
 Go to parent directory
 
-=item n
+=item B<n>
 
 Order by filename (press again for descending order)
 
-=item s
+=item B<s>
 
 Order by filesize (press again for descending order)
 
-=item C
+=item B<C>
 
 Order by number of items (press again for descending order)
 
-=item a
+=item B<a>
 
 Toggle between showing disk usage and showing apparent size.
 
-=item M
+=item B<M>
 
 Order by latest child mtime, or modified time. (press again for descending order)
 Requires the -e flag.
 
-=item d
+=item B<d>
 
 Delete the selected file or directory. An error message will be shown when the
 contents of the directory do not match or do not exist anymore on the
 filesystem.
 
-=item t
+=item B<t>
 
 Toggle dirs before files when sorting.
 
-=item g
+=item B<g>
 
 Toggle between showing percentage, graph, both, or none. Percentage is relative
 to the size of the current directory, graph is relative to the largest item in
 the current directory.
 
-=item c
+=item B<c>
 
 Toggle display of child item counts.
 
-=item m
+=item B<m>
 
 Toggle display of latest child mtime, or modified time. Requires the -e flag.
 
-=item e
+=item B<e>
 
 Show/hide 'hidden' or 'excluded' files and directories. Please note that even
 though you can't see the hidden files and directories, they are still there and
@@ -269,15 +269,15 @@ they are still included in the directory sizes. If you suspect that the totals
 shown at the bottom of the screen are not correct, make sure you haven't
 enabled this option.
 
-=item i
+=item B<i>
 
 Show information about the current selected item.
 
-=item r
+=item B<r>
 
 Refresh/recalculate the current directory.
 
-=item b
+=item B<b>
 
 Spawn shell in current directory.
 
@@ -296,7 +296,7 @@ running from within ncdu, which can be useful to avoid nesting multiple
 instances of ncdu. Ncdu itself does not (currently) warn when attempting to run
 nested instances.
 
-=item q
+=item B<q>
 
 Quit
 
@@ -310,36 +310,36 @@ flags have the following meaning:
 
 =over
 
-=item !
+=item B<!>
 
 An error occurred while reading this directory.
 
-=item .
+=item B<.>
 
 An error occurred while reading a subdirectory, so the indicated size may not be
 correct.
 
-=item <
+=item B<<>
 
 File or directory is excluded from the statistics by using exclude patterns.
 
-=item >
+=item B<< > >>
 
 Directory is on another filesystem.
 
-=item ^
+=item B<^>
 
 Directory is excluded from the statistics due to being a Linux pseudo filesystem.
 
-=item @
+=item B<@>
 
 This is neither a file nor a folder (symlink, socket, ...).
 
-=item H
+=item B<H>
 
 Same file was already counted (hard link).
 
-=item e
+=item B<e>
 
 Empty directory.
 
