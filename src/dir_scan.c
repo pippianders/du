@@ -172,13 +172,13 @@ static char *dir_read(int *err) {
     }
     if(item->d_name[0] == '.' && (item->d_name[1] == 0 || (item->d_name[1] == '.' && item->d_name[2] == 0)))
       continue;
-    size_t req = off+3+strlen(item->d_name);
+    size_t len = strlen(item->d_name), req = off+3+len;
     if(req > buflen) {
       buflen = req < buflen*2 ? buflen*2 : req;
       buf = xrealloc(buf, buflen);
     }
     strcpy(buf+off, item->d_name);
-    off += strlen(item->d_name)+1;
+    off += len+1;
   }
   if(closedir(dir) < 0)
     *err = 1;
