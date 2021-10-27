@@ -162,9 +162,14 @@ static char *dir_read(int *err) {
   }
 
   buf = xmalloc(buflen);
-  errno = 0;
 
-  while((item = readdir(dir)) != NULL) {
+  while(1) {
+    errno = 0;
+    if ((item = readdir(dir)) == NULL) {
+      if(errno)
+        *err = 1;
+      break;
+    }
     if(item->d_name[0] == '.' && (item->d_name[1] == 0 || (item->d_name[1] == '.' && item->d_name[2] == 0)))
       continue;
     size_t req = off+3+strlen(item->d_name);
@@ -175,8 +180,6 @@ static char *dir_read(int *err) {
     strcpy(buf+off, item->d_name);
     off += strlen(item->d_name)+1;
   }
-  if(errno)
-    *err = 1;
   if(closedir(dir) < 0)
     *err = 1;
 
