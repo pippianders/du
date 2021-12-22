@@ -24,6 +24,7 @@
 */
 
 #include "global.h"
+#include "strnatcmp.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -79,7 +80,7 @@ static int dirlist_cmp(struct dir *x, struct dir *y) {
    *
    * Note that the method used below is supposed to be fast, not readable :-)
    */
-#define CMP_NAME  strcmp(x->name, y->name)
+#define CMP_NAME  strnatcmp(x->name, y->name)
 #define CMP_SIZE  (x->size  > y->size  ? 1 : (x->size  == y->size  ? 0 : -1))
 #define CMP_ASIZE (x->asize > y->asize ? 1 : (x->asize == y->asize ? 0 : -1))
 #define CMP_ITEMS (x->items > y->items ? 1 : (x->items == y->items ? 0 : -1))
@@ -395,4 +396,3 @@ void dirlist_set_hidden(int hidden) {
   dirlist_fixup();
   dirlist_top(-5);
 }
-

@@ -12,6 +12,7 @@ ncdu_SOURCES=\
 	src/dir_scan.c\
 	src/exclude.c\
 	src/help.c\
+	src/strnatcmp.c\
 	src/shell.c\
 	src/quit.c\
 	src/main.c\
