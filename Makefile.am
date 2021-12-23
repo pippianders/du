@@ -12,16 +12,18 @@ ncdu_SOURCES=\
 	src/dir_scan.c\
 	src/exclude.c\
 	src/help.c\
-	src/strnatcmp.c\
 	src/shell.c\
 	src/quit.c\
 	src/main.c\
 	src/path.c\
-	src/util.c
+	src/util.c\
+	deps/strnatcmp.c
+
 
 noinst_HEADERS=\
 	deps/yopt.h\
 	deps/khashl.h\
+	deps/strnatcmp.h\
 	src/browser.h\
 	src/delete.h\
 	src/dir.h\
@@ -46,3 +48,5 @@ ncdu.1: $(srcdir)/doc/ncdu.pod
 update-deps:
 	wget -q https://raw.github.com/attractivechaos/klib/master/khashl.h -O "$(srcdir)/deps/khashl.h"
 	wget -q http://g.blicky.net/ylib.git/plain/yopt.h -O "$(srcdir)/deps/yopt.h"
+	wget -q https://raw.githubusercontent.com/sourcefrog/natsort/master/strnatcmp.h -O "$(srcdir)/deps/strnatcmp.h"
+	wget -q https://raw.githubusercontent.com/sourcefrog/natsort/master/strnatcmp.c -O "$(srcdir)/deps/strnatcmp.c"
