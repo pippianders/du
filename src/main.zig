@@ -42,6 +42,7 @@ pub const config = struct {
 
     pub var same_fs: bool = false;
     pub var extended: bool = false;
+    pub var parallel: u8 = 1;
     pub var follow_symlinks: bool = false;
     pub var exclude_caches: bool = false;
     pub var exclude_kernfs: bool = false;
@@ -158,7 +159,11 @@ const Args = struct {
 fn argConfig(args: *Args, opt: Args.Option) bool {
     if (opt.is("-q") or opt.is("--slow-ui-updates")) config.update_delay = 2*std.time.ns_per_s
     else if (opt.is("--fast-ui-updates")) config.update_delay = 100*std.time.ns_per_ms
-    else if (opt.is("-x") or opt.is("--one-file-system")) config.same_fs = true
+    else if (opt.is("-J")) {
+        const val = args.arg();
+        config.parallel = std.fmt.parseInt(u8, val, 10) catch ui.die("Invalid argument to -J: {s}, expected number.\n", .{val});
+        if (config.parallel == 0) ui.die("Number of threads (-J) cannot be 0.\n", .{});
+    } else if (opt.is("-x") or opt.is("--one-file-system")) config.same_fs = true
     else if (opt.is("--cross-file-system")) config.same_fs = false
     else if (opt.is("-e") or opt.is("--extended")) config.extended = true
     else if (opt.is("--no-extended")) config.extended = false
