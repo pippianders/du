@@ -848,10 +848,8 @@ pub fn keyInput(ch: i32) void {
         'r' => {
             if (!main.config.can_refresh.?)
                 message = "Directory refresh feature disabled."
-            else {
+            else
                 main.state = .refresh;
-                scan.setupRefresh(dir_parent);
-            }
         },
         'b' => {
             if (!main.config.can_shell.?)

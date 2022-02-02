@@ -9,6 +9,15 @@ const util = @import("util.zig");
 const c_statfs = @cImport(@cInclude("sys/vfs.h"));
 const c_fnmatch = @cImport(@cInclude("fnmatch.h"));
 
+var file_writer: ?*FileWriter = null;
+var items_seen: u32 = 0;
+var last_level: ?*Level = null;
+var last_error = std.ArrayList(u8).init(main.allocator);
+var fatal_error: ?anyerror = null;
+
+const FileWriter = std.io.BufferedWriter(4096, std.fs.File.Writer);
+const Special = enum { err, other_fs, kernfs, excluded };
+
 
 // Concise stat struct for fields we're interested in, with the types used by the model.
 const Stat = struct {
@@ -53,6 +62,396 @@ const Stat = struct {
     }
 };
 
+
+fn writeErr(e: anyerror) noreturn {
+    ui.die("Error writing to file: {s}.\n", .{ ui.errorString(e) });
+}
+
+// Output a JSON string.
+// Could use std.json.stringify(), but that implementation is "correct" in that
+// it refuses to encode non-UTF8 slices as strings. Ncdu dumps aren't valid
+// JSON if we have non-UTF8 filenames, such is life...
+fn writeJsonString(wr: anytype, s: []const u8) !void {
+    try wr.writeByte('"');
+    for (s) |ch| {
+        switch (ch) {
+            '\n' => try wr.writeAll("\\n"),
+            '\r' => try wr.writeAll("\\r"),
+            0x8  => try wr.writeAll("\\b"),
+            '\t' => try wr.writeAll("\\t"),
+            0xC  => try wr.writeAll("\\f"),
+            '\\' => try wr.writeAll("\\\\"),
+            '"'  => try wr.writeAll("\\\""),
+            0...7, 0xB, 0xE...0x1F, 127 => try wr.print("\\u00{x:02}", .{ch}),
+            else => try wr.writeByte(ch)
+        }
+    }
+    try wr.writeByte('"');
+}
+
+fn writeSpecial(w: anytype, name: []const u8, t: Special, isdir: bool) !void {
+    try w.writeAll(",\n");
+    if (isdir) try w.writeByte('[');
+    try w.writeAll("{\"name\":");
+    try writeJsonString(w, name);
+    switch (t) {
+        .err => try w.writeAll(",\"read_error\":true"),
+        .other_fs => try w.writeAll(",\"excluded\":\"othfs\""),
+        .kernfs => try w.writeAll(",\"excluded\":\"kernfs\""),
+        .excluded => try w.writeAll(",\"excluded\":\"pattern\""),
+    }
+    try w.writeByte('}');
+    if (isdir) try w.writeByte(']');
+}
+
+fn writeStat(w: anytype, name: []const u8, stat: *const Stat, read_error: bool, dir_dev: u64) !void {
+    try w.writeAll(",\n");
+    if (stat.dir) try w.writeByte('[');
+    try w.writeAll("{\"name\":");
+    try writeJsonString(w, name);
+    if (stat.size > 0) try w.print(",\"asize\":{d}", .{ stat.size });
+    if (stat.blocks > 0) try w.print(",\"dsize\":{d}", .{ util.blocksToSize(stat.blocks) });
+    if (stat.dir and stat.dev != 0 and stat.dev != dir_dev) try w.print(",\"dev\":{d}", .{ stat.dev });
+    if (stat.hlinkc) try w.print(",\"ino\":{d},\"hlnkc\":true,\"nlink\":{d}", .{ stat.ino, stat.nlink });
+    if (!stat.dir and !stat.reg) try w.writeAll(",\"notreg\":true");
+    if (read_error) try w.writeAll(",\"read_error\":true");
+    if (main.config.extended)
+        try w.print(",\"uid\":{d},\"gid\":{d},\"mode\":{d},\"mtime\":{d}",
+            .{ stat.ext.uid, stat.ext.gid, stat.ext.mode, stat.ext.mtime });
+    try w.writeByte('}');
+}
+
+
+// A MemDir represents an in-memory directory listing (i.e. model.Dir) where
+// entries read from disk can be merged into, without doing an O(1) lookup for
+// each entry.
+const MemDir = struct {
+    dir: ?*model.Dir,
+
+    // Lookup table for name -> *entry.
+    // null is never stored in the table, but instead used pass a name string
+    // as out-of-band argument for lookups.
+    entries: Map,
+    const Map = std.HashMap(?*model.Entry, void, HashContext, 80);
+
+    const HashContext = struct {
+        cmp: []const u8 = "",
+
+        pub fn hash(self: @This(), v: ?*model.Entry) u64 {
+            return std.hash.Wyhash.hash(0, if (v) |e| @as([]const u8, e.name()) else self.cmp);
+        }
+
+        pub fn eql(self: @This(), ap: ?*model.Entry, bp: ?*model.Entry) bool {
+            if (ap == bp) return true;
+            const a = if (ap) |e| @as([]const u8, e.name()) else self.cmp;
+            const b = if (bp) |e| @as([]const u8, e.name()) else self.cmp;
+            return std.mem.eql(u8, a, b);
+        }
+    };
+
+    const Self = @This();
+
+    fn init(dir: ?*model.Dir) Self {
+        var self = Self{
+            .dir = dir,
+            .entries = Map.initContext(main.allocator, HashContext{}),
+        };
+
+        var count: Map.Size = 0;
+        var it = if (dir) |d| d.sub else null;
+        while (it) |e| : (it = e.next) count += 1;
+        self.entries.ensureUnusedCapacity(count) catch unreachable;
+
+        it = if (dir) |d| d.sub else null;
+        while (it) |e| : (it = e.next)
+            self.entries.putAssumeCapacity(e, @as(void,undefined));
+        return self;
+    }
+
+    fn addSpecial(self: *Self, name: []const u8, t: Special) void {
+        var dir = self.dir orelse unreachable; // root can't be a Special
+        var e = blk: {
+            if (self.entries.getEntryAdapted(@as(?*model.Entry,null), HashContext{ .cmp = name })) |entry| {
+                // XXX: If the type doesn't match, we could always do an
+                // in-place conversion to a File entry. That's more efficient,
+                // but also more code. I don't expect this to happen often.
+                var e = entry.key_ptr.*.?;
+                if (e.etype == .file) {
+                    if (e.size > 0 or e.blocks > 0) {
+                        e.delStats(dir);
+                        e.size = 0;
+                        e.blocks = 0;
+                        e.addStats(dir, 0);
+                    }
+                    e.file().?.resetFlags();
+                    _ = self.entries.removeAdapted(@as(?*model.Entry,null), HashContext{ .cmp = name });
+                    break :blk e;
+                } else e.delStatsRec(dir);
+            }
+            var e = model.Entry.create(.file, false, name);
+            e.next = dir.sub;
+            dir.sub = e;
+            e.addStats(dir, 0);
+            break :blk e;
+        };
+        var f = e.file().?;
+        switch (t) {
+            .err => e.setErr(dir),
+            .other_fs => f.other_fs = true,
+            .kernfs => f.kernfs = true,
+            .excluded => f.excluded = true,
+        }
+    }
+
+    fn addStat(self: *Self, name: []const u8, stat: *const Stat) *model.Entry {
+        const etype = if (stat.dir) model.EType.dir
+                      else if (stat.hlinkc) model.EType.link
+                      else model.EType.file;
+        var e = blk: {
+            if (self.entries.getEntryAdapted(@as(?*model.Entry,null), HashContext{ .cmp = name })) |entry| {
+                // XXX: In-place conversion may also be possible here.
+                var e = entry.key_ptr.*.?;
+                // changes of dev/ino affect hard link counting in a way we can't simply merge.
+                const samedev = if (e.dir()) |d| d.dev == model.devices.getId(stat.dev) else true;
+                const sameino = if (e.link()) |l| l.ino == stat.ino else true;
+                if (e.etype == etype and samedev and sameino) {
+                    _ = self.entries.removeAdapted(@as(?*model.Entry,null), HashContext{ .cmp = name });
+                    break :blk e;
+                } else e.delStatsRec(self.dir.?);
+            }
+            var e = model.Entry.create(etype, main.config.extended, name);
+            if (self.dir) |d| {
+                e.next = d.sub;
+                d.sub = e;
+            } else
+                model.root = e.dir() orelse unreachable;
+            break :blk e;
+        };
+        // Ignore the new size/blocks field for directories, as we don't know
+        // what the original values were without calling delStats() on the
+        // entire subtree, which, in turn, would break all shared hardlink
+        // sizes. The current approach may result in incorrect sizes after
+        // refresh, but I expect the difference to be fairly minor.
+        if (!(e.etype == .dir and e.counted) and (e.blocks != stat.blocks or e.size != stat.size)) {
+            if (self.dir) |d| e.delStats(d);
+            e.blocks = stat.blocks;
+            e.size = stat.size;
+        }
+        if (e.dir()) |d| {
+            d.parent = self.dir;
+            d.dev = model.devices.getId(stat.dev);
+        }
+        if (e.file()) |f| {
+            f.resetFlags();
+            f.notreg = !stat.dir and !stat.reg;
+        }
+        if (e.link()) |l| l.ino = stat.ino;
+        if (e.ext()) |ext| {
+            const mtime = ext.mtime;
+            ext.* = stat.ext;
+            if (mtime > ext.mtime) ext.mtime = mtime;
+        }
+
+        if (self.dir) |d| e.addStats(d, stat.nlink);
+        return e;
+    }
+
+    fn final(self: *Self) void {
+        if (self.entries.count() == 0) // optimization for the common case
+            return;
+        var dir = self.dir orelse return;
+        var it = &dir.sub;
+        while (it.*) |e| {
+            if (self.entries.contains(e)) {
+                e.delStatsRec(dir);
+                it.* = e.next;
+            } else
+                it = &e.next;
+        }
+    }
+
+    fn deinit(self: *Self) void {
+        self.entries.deinit();
+    }
+};
+
+
+// Abstract "directory level" API for processing scan/import results and
+// assembling those into an in-memory representation for browsing or to a JSON
+// format for exporting.
+const Level = struct {
+    sub: ?*Level = null,
+    parent: ?*Level = null,
+    ctx: Ctx,
+
+    const Ctx = union(enum) {
+        mem: MemDir,
+        file: File,
+    };
+
+    const File = struct {
+        // buffer for entries we can output once the sub-levels are finished.
+        buf: std.ArrayList(u8) = std.ArrayList(u8).init(main.allocator),
+        dir_dev: u64,
+        name: []u8, // Separate allocation, only used for reporting
+    };
+
+    const LevelWriter = std.io.Writer(*Level, FileWriter.Error || error{OutOfMemory}, Level.write);
+
+    fn write(self: *Level, bytes: []const u8) !usize {
+        if (self.sub == null) return try file_writer.?.write(bytes);
+        switch (self.ctx) {
+            Ctx.mem => unreachable,
+            Ctx.file => |*f| {
+                f.buf.appendSlice(bytes) catch unreachable;
+                return bytes.len;
+            }
+        }
+    }
+
+    fn writer(self: *Level) LevelWriter {
+        return .{ .context = self };
+    }
+
+    fn fmtPath(self: *Level, out: *std.ArrayList(u8)) void {
+        switch (self.ctx) {
+            Ctx.mem => |m| {
+                if (m.dir) |d| d.fmtPath(true, out)
+                else out.append('/') catch unreachable;
+            },
+            Ctx.file => |f| {
+                if (self.parent) |p| {
+                    p.fmtPath(out);
+                    out.append('/') catch unreachable;
+                }
+                out.appendSlice(f.name) catch unreachable;
+            },
+        }
+    }
+
+    fn addSpecial(self: *Level, name: []const u8, t: Special, isdir: bool) void {
+        if (t == .err and main.config.scan_ui.? != .none) {
+            last_error.clearRetainingCapacity();
+            self.fmtPath(&last_error);
+            last_error.append('/') catch unreachable;
+            last_error.appendSlice(name) catch unreachable;
+        }
+
+        switch (self.ctx) {
+            Ctx.mem => |*m| m.addSpecial(name, t),
+            Ctx.file => writeSpecial(self.writer(), name, t, isdir) catch |e| writeErr(e),
+        }
+        items_seen += 1;
+    }
+
+    // (can also be used for empty dirs)
+    fn addFile(self: *Level, name: []const u8, stat: *const Stat, read_error: bool) void {
+        switch (self.ctx) {
+            Ctx.mem => |*m| _ = m.addStat(name, stat),
+            Ctx.file => {
+                writeStat(self.writer(), name, stat, read_error, 0) catch |e| writeErr(e);
+                if (stat.dir) self.writer().writeByte(']') catch |e| writeErr(e);
+            },
+        }
+        items_seen += 1;
+    }
+
+    fn addDir(self: *Level, name: []const u8, stat: *const Stat, list_error: bool, sub_lvl: *Level) void {
+        std.debug.assert(stat.dir);
+        std.debug.assert(self.sub == null); // We don't support disjoint trees, that would require extra buffering.
+        switch (self.ctx) {
+            Ctx.mem => |*m| {
+                const dir = m.addStat(name, stat).dir() orelse unreachable;
+                if (list_error) dir.entry.setErr(dir);
+                sub_lvl.* = .{ .parent = self, .ctx = .{ .mem = MemDir.init(dir) } };
+            },
+            Ctx.file => |f| {
+                writeStat(self.writer(), name, stat, list_error, f.dir_dev) catch |e| writeErr(e);
+                sub_lvl.* = .{ .parent = self, .ctx = .{ .file = .{
+                    .dir_dev = stat.dev,
+                    .name = main.allocator.dupe(u8, name) catch unreachable,
+                } } };
+            },
+        }
+        self.sub = sub_lvl;
+        last_level = sub_lvl;
+        items_seen += 1;
+    }
+
+    fn close(self: *Level) void {
+        std.debug.assert(self.sub == null);
+        switch (self.ctx) {
+            Ctx.mem => |*m| {
+                m.final();
+                m.deinit();
+            },
+            Ctx.file => |*f| {
+                file_writer.?.writer().writeAll(f.buf.items) catch |e| writeErr(e);
+                file_writer.?.writer().writeByte(']') catch |e| writeErr(e);
+                f.buf.deinit();
+                main.allocator.free(f.name);
+            },
+        }
+        if (self.parent) |p| {
+            p.sub = null;
+            last_level = p;
+            switch (p.ctx) {
+                Ctx.file => |*f| {
+                    file_writer.?.writer().writeAll(f.buf.items) catch |e| writeErr(e);
+                    f.buf.clearRetainingCapacity();
+                },
+                else => {},
+            }
+        } else {
+            switch (self.ctx) {
+                Ctx.mem => {
+                    counting_hardlinks = true;
+                    defer counting_hardlinks = false;
+                    main.handleEvent(false, true);
+                    model.inodes.addAllStats();
+                },
+                Ctx.file => {
+                    var w = file_writer.?;
+                    w.flush() catch |e| writeErr(e);
+                    main.allocator.destroy(w);
+                },
+            }
+        }
+        self.* = undefined;
+    }
+};
+
+fn initFile(out: std.fs.File, lvl: *Level) void {
+    var buf = main.allocator.create(FileWriter) catch unreachable;
+    errdefer main.allocator.destroy(buf);
+    buf.* = std.io.bufferedWriter(out.writer());
+    var wr = buf.writer();
+    wr.writeAll("[1,2,{\"progname\":\"ncdu\",\"progver\":\"" ++ main.program_version ++ "\",\"timestamp\":") catch |e| writeErr(e);
+    wr.print("{d}", .{std.time.timestamp()}) catch |e| writeErr(e);
+    wr.writeByte('}') catch |e| writeErr(e);
+
+    file_writer = buf;
+    lvl.* = .{ .ctx = Level.Ctx{ .file = .{
+        .dir_dev = 0,
+        .name = main.allocator.dupe(u8, "") catch unreachable,
+    } } };
+
+    last_error.clearRetainingCapacity();
+    last_level = lvl;
+    fatal_error = null;
+    items_seen = 0;
+}
+
+fn initMem(dir: ?*model.Dir, lvl: *Level) void {
+    lvl.* = .{ .ctx = Level.Ctx{ .mem = MemDir.init(dir) } };
+
+    last_error.clearRetainingCapacity();
+    last_level = lvl;
+    fatal_error = null;
+    items_seen = 0;
+}
+
+
 // This function only works on Linux
 fn isKernfs(dir: std.fs.Dir, dev: u64) bool {
     const state = struct {
@@ -85,377 +484,6 @@ fn isKernfs(dir: std.fs.Dir, dev: u64) bool {
     return iskern;
 }
 
-// Output a JSON string.
-// Could use std.json.stringify(), but that implementation is "correct" in that
-// it refuses to encode non-UTF8 slices as strings. Ncdu dumps aren't valid
-// JSON if we have non-UTF8 filenames, such is life...
-fn writeJsonString(wr: anytype, s: []const u8) !void {
-    try wr.writeByte('"');
-    for (s) |ch| {
-        switch (ch) {
-            '\n' => try wr.writeAll("\\n"),
-            '\r' => try wr.writeAll("\\r"),
-            0x8  => try wr.writeAll("\\b"),
-            '\t' => try wr.writeAll("\\t"),
-            0xC  => try wr.writeAll("\\f"),
-            '\\' => try wr.writeAll("\\\\"),
-            '"'  => try wr.writeAll("\\\""),
-            0...7, 0xB, 0xE...0x1F, 127 => try wr.print("\\u00{x:02}", .{ch}),
-            else => try wr.writeByte(ch)
-        }
-    }
-    try wr.writeByte('"');
-}
-
-// A MemDir represents an in-memory directory listing (i.e. model.Dir) where
-// entries read from disk can be merged into, without doing an O(1) lookup for
-// each entry.
-const MemDir = struct {
-    dir: *model.Dir,
-
-    // Lookup table for name -> *entry.
-    // null is never stored in the table, but instead used pass a name string
-    // as out-of-band argument for lookups.
-    entries: Map,
-    const Map = std.HashMap(?*model.Entry, void, HashContext, 80);
-
-    const HashContext = struct {
-        cmp: []const u8 = "",
-
-        pub fn hash(self: @This(), v: ?*model.Entry) u64 {
-            return std.hash.Wyhash.hash(0, if (v) |e| @as([]const u8, e.name()) else self.cmp);
-        }
-
-        pub fn eql(self: @This(), ap: ?*model.Entry, bp: ?*model.Entry) bool {
-            if (ap == bp) return true;
-            const a = if (ap) |e| @as([]const u8, e.name()) else self.cmp;
-            const b = if (bp) |e| @as([]const u8, e.name()) else self.cmp;
-            return std.mem.eql(u8, a, b);
-        }
-    };
-
-    const Self = @This();
-
-    fn init(dir: *model.Dir) Self {
-        var self = Self{
-            .dir = dir,
-            .entries = Map.initContext(main.allocator, HashContext{}),
-        };
-
-        var count: Map.Size = 0;
-        var it = dir.sub;
-        while (it) |e| : (it = e.next) count += 1;
-        self.entries.ensureUnusedCapacity(count) catch unreachable;
-
-        it = dir.sub;
-        while (it) |e| : (it = e.next)
-            self.entries.putAssumeCapacity(e, @as(void,undefined));
-        return self;
-    }
-
-    fn addSpecial(self: *Self, name: []const u8, t: Context.Special) void {
-        var e = blk: {
-            if (self.entries.getEntryAdapted(@as(?*model.Entry,null), HashContext{ .cmp = name })) |entry| {
-                // XXX: If the type doesn't match, we could always do an
-                // in-place conversion to a File entry. That's more efficient,
-                // but also more code. I don't expect this to happen often.
-                var e = entry.key_ptr.*.?;
-                if (e.etype == .file) {
-                    if (e.size > 0 or e.blocks > 0) {
-                        e.delStats(self.dir);
-                        e.size = 0;
-                        e.blocks = 0;
-                        e.addStats(self.dir, 0);
-                    }
-                    e.file().?.resetFlags();
-                    _ = self.entries.removeAdapted(@as(?*model.Entry,null), HashContext{ .cmp = name });
-                    break :blk e;
-                } else e.delStatsRec(self.dir);
-            }
-            var e = model.Entry.create(.file, false, name);
-            e.next = self.dir.sub;
-            self.dir.sub = e;
-            e.addStats(self.dir, 0);
-            break :blk e;
-        };
-        var f = e.file().?;
-        switch (t) {
-            .err => e.setErr(self.dir),
-            .other_fs => f.other_fs = true,
-            .kernfs => f.kernfs = true,
-            .excluded => f.excluded = true,
-        }
-    }
-
-    fn addStat(self: *Self, name: []const u8, stat: *Stat) *model.Entry {
-        const etype = if (stat.dir) model.EType.dir
-                      else if (stat.hlinkc) model.EType.link
-                      else model.EType.file;
-        var e = blk: {
-            if (self.entries.getEntryAdapted(@as(?*model.Entry,null), HashContext{ .cmp = name })) |entry| {
-                // XXX: In-place conversion may also be possible here.
-                var e = entry.key_ptr.*.?;
-                // changes of dev/ino affect hard link counting in a way we can't simply merge.
-                const samedev = if (e.dir()) |d| d.dev == model.devices.getId(stat.dev) else true;
-                const sameino = if (e.link()) |l| l.ino == stat.ino else true;
-                if (e.etype == etype and samedev and sameino) {
-                    _ = self.entries.removeAdapted(@as(?*model.Entry,null), HashContext{ .cmp = name });
-                    break :blk e;
-                } else e.delStatsRec(self.dir);
-            }
-            var e = model.Entry.create(etype, main.config.extended, name);
-            e.next = self.dir.sub;
-            self.dir.sub = e;
-            break :blk e;
-        };
-        // Ignore the new size/blocks field for directories, as we don't know
-        // what the original values were without calling delStats() on the
-        // entire subtree, which, in turn, would break all shared hardlink
-        // sizes. The current approach may result in incorrect sizes after
-        // refresh, but I expect the difference to be fairly minor.
-        if (!(e.etype == .dir and e.counted) and (e.blocks != stat.blocks or e.size != stat.size)) {
-            e.delStats(self.dir);
-            e.blocks = stat.blocks;
-            e.size = stat.size;
-        }
-        if (e.dir()) |d| {
-            d.parent = self.dir;
-            d.dev = model.devices.getId(stat.dev);
-        }
-        if (e.file()) |f| {
-            f.resetFlags();
-            f.notreg = !stat.dir and !stat.reg;
-        }
-        if (e.link()) |l| l.ino = stat.ino;
-        if (e.ext()) |ext| {
-            if (ext.mtime > stat.ext.mtime)
-                stat.ext.mtime = ext.mtime;
-            ext.* = stat.ext;
-        }
-
-        e.addStats(self.dir, stat.nlink);
-        return e;
-    }
-
-    fn final(self: *Self) void {
-        if (self.entries.count() == 0) // optimization for the common case
-            return;
-        var it = &self.dir.sub;
-        while (it.*) |e| {
-            if (self.entries.contains(e)) {
-                e.delStatsRec(self.dir);
-                it.* = e.next;
-            } else
-                it = &e.next;
-        }
-    }
-
-    fn deinit(self: *Self) void {
-        self.entries.deinit();
-    }
-};
-
-// Scan/import context. Entries are added in roughly the following way:
-//
-//   ctx.pushPath(name)
-//   ctx.stat = ..;
-//   ctx.addSpecial() or ctx.addStat()
-//   if (ctx.stat.dir) {
-//      // repeat top-level steps for files in dir, recursively.
-//   }
-//   ctx.popPath();
-//
-const Context = struct {
-    // When scanning to RAM
-    parents: ?std.ArrayList(MemDir) = null,
-    // When scanning to a file
-    wr: ?*Writer = null,
-
-    path: std.ArrayList(u8) = std.ArrayList(u8).init(main.allocator),
-    path_indices: std.ArrayList(usize) = std.ArrayList(usize).init(main.allocator),
-    items_seen: u32 = 0,
-
-    // 0-terminated name of the top entry, points into 'path', invalid after popPath().
-    // This is a workaround to Zig's directory iterator not returning a [:0]const u8.
-    name: [:0]const u8 = undefined,
-
-    last_error: ?[:0]u8 = null,
-    fatal_error: ?anyerror = null,
-
-    stat: Stat = undefined,
-
-    const Writer = std.io.BufferedWriter(4096, std.fs.File.Writer);
-    const Self = @This();
-
-    fn writeErr(e: anyerror) noreturn {
-        ui.die("Error writing to file: {s}.\n", .{ ui.errorString(e) });
-    }
-
-    fn initFile(out: std.fs.File) *Self {
-        var buf = main.allocator.create(Writer) catch unreachable;
-        errdefer main.allocator.destroy(buf);
-        buf.* = std.io.bufferedWriter(out.writer());
-        var wr = buf.writer();
-        wr.writeAll("[1,2,{\"progname\":\"ncdu\",\"progver\":\"" ++ main.program_version ++ "\",\"timestamp\":") catch |e| writeErr(e);
-        wr.print("{d}", .{std.time.timestamp()}) catch |e| writeErr(e);
-        wr.writeByte('}') catch |e| writeErr(e);
-
-        var self = main.allocator.create(Self) catch unreachable;
-        self.* = .{ .wr = buf };
-        return self;
-    }
-
-    fn initMem(dir: ?*model.Dir) *Self {
-        var self = main.allocator.create(Self) catch unreachable;
-        self.* = .{ .parents = std.ArrayList(MemDir).init(main.allocator) };
-        if (dir) |d| self.parents.?.append(MemDir.init(d)) catch unreachable;
-        return self;
-    }
-
-    fn final(self: *Self) void {
-        if (self.parents) |_| {
-            counting_hardlinks = true;
-            defer counting_hardlinks = false;
-            main.handleEvent(false, true);
-            model.inodes.addAllStats();
-        }
-        if (self.wr) |wr| {
-            wr.writer().writeByte(']') catch |e| writeErr(e);
-            wr.flush() catch |e| writeErr(e);
-        }
-    }
-
-    // Add the name of the file/dir entry we're currently inspecting
-    fn pushPath(self: *Self, name: []const u8) void {
-        self.path_indices.append(self.path.items.len) catch unreachable;
-        if (self.path.items.len > 1) self.path.append('/') catch unreachable;
-        const start = self.path.items.len;
-        self.path.appendSlice(name) catch unreachable;
-
-        self.path.append(0) catch unreachable;
-        self.name = self.path.items[start..self.path.items.len-1:0];
-        self.path.items.len -= 1;
-    }
-
-    fn popPath(self: *Self) void {
-        self.path.items.len = self.path_indices.pop();
-
-        if (self.stat.dir) {
-            if (self.parents) |*p| {
-                if (p.items.len > 0) {
-                    var d = p.pop();
-                    d.final();
-                    d.deinit();
-                }
-            }
-            if (self.wr) |w| w.writer().writeByte(']') catch |e| writeErr(e);
-        } else
-            self.stat.dir = true; // repeated popPath()s mean we're closing parent dirs.
-    }
-
-    fn pathZ(self: *Self) [:0]const u8 {
-        return util.arrayListBufZ(&self.path);
-    }
-
-    // Set a flag to indicate that there was an error listing file entries in the current directory.
-    // (Such errors are silently ignored when exporting to a file, as the directory metadata has already been written)
-    fn setDirlistError(self: *Self) void {
-        if (self.parents) |*p| p.items[p.items.len-1].dir.entry.setErr(p.items[p.items.len-1].dir);
-    }
-
-    const Special = enum { err, other_fs, kernfs, excluded };
-
-    fn writeSpecial(self: *Self, w: anytype, t: Special) !void {
-        try w.writeAll(",\n");
-        if (self.stat.dir) try w.writeByte('[');
-        try w.writeAll("{\"name\":");
-        try writeJsonString(w, self.name);
-        switch (t) {
-            .err => try w.writeAll(",\"read_error\":true"),
-            .other_fs => try w.writeAll(",\"excluded\":\"othfs\""),
-            .kernfs => try w.writeAll(",\"excluded\":\"kernfs\""),
-            .excluded => try w.writeAll(",\"excluded\":\"pattern\""),
-        }
-        try w.writeByte('}');
-        if (self.stat.dir) try w.writeByte(']');
-    }
-
-    // Insert the current path as a special entry (i.e. a file/dir that is not counted)
-    // Ignores self.stat except for the 'dir' option.
-    fn addSpecial(self: *Self, t: Special) void {
-        std.debug.assert(self.items_seen > 0); // root item can't be a special
-
-        if (t == .err) {
-            if (self.last_error) |p| main.allocator.free(p);
-            self.last_error = main.allocator.dupeZ(u8, self.path.items) catch unreachable;
-        }
-
-        if (self.parents) |*p|
-            p.items[p.items.len-1].addSpecial(self.name, t)
-        else if (self.wr) |wr|
-            self.writeSpecial(wr.writer(), t) catch |e| writeErr(e);
-
-        self.stat.dir = false; // So that popPath() doesn't consider this as leaving a dir.
-        self.items_seen += 1;
-    }
-
-    fn writeStat(self: *Self, w: anytype, dir_dev: u64) !void {
-        try w.writeAll(",\n");
-        if (self.stat.dir) try w.writeByte('[');
-        try w.writeAll("{\"name\":");
-        try writeJsonString(w, self.name);
-        if (self.stat.size > 0) try w.print(",\"asize\":{d}", .{ self.stat.size });
-        if (self.stat.blocks > 0) try w.print(",\"dsize\":{d}", .{ util.blocksToSize(self.stat.blocks) });
-        if (self.stat.dir and self.stat.dev != dir_dev) try w.print(",\"dev\":{d}", .{ self.stat.dev });
-        if (self.stat.hlinkc) try w.print(",\"ino\":{d},\"hlnkc\":true,\"nlink\":{d}", .{ self.stat.ino, self.stat.nlink });
-        if (!self.stat.dir and !self.stat.reg) try w.writeAll(",\"notreg\":true");
-        if (main.config.extended)
-            try w.print(",\"uid\":{d},\"gid\":{d},\"mode\":{d},\"mtime\":{d}",
-                .{ self.stat.ext.uid, self.stat.ext.gid, self.stat.ext.mode, self.stat.ext.mtime });
-        try w.writeByte('}');
-    }
-
-    // Insert current path as a counted file/dir/hardlink, with information from self.stat
-    fn addStat(self: *Self, dir_dev: u64) void {
-        if (self.parents) |*p| {
-            var e = if (p.items.len == 0) blk: {
-                // Root entry
-                var e = model.Entry.create(.dir, main.config.extended, self.name);
-                e.blocks = self.stat.blocks;
-                e.size = self.stat.size;
-                if (e.ext()) |ext| ext.* = self.stat.ext;
-                model.root = e.dir().?;
-                model.root.dev = model.devices.getId(self.stat.dev);
-                break :blk e;
-            } else
-                p.items[p.items.len-1].addStat(self.name, &self.stat);
-
-            if (e.dir()) |d| // Enter the directory
-                p.append(MemDir.init(d)) catch unreachable;
-
-        } else if (self.wr) |wr|
-            self.writeStat(wr.writer(), dir_dev) catch |e| writeErr(e);
-
-        self.items_seen += 1;
-    }
-
-    fn deinit(self: *Self) void {
-        if (self.last_error) |p| main.allocator.free(p);
-        if (self.parents) |*p| {
-            for (p.items) |*i| i.deinit();
-            p.deinit();
-        }
-        if (self.wr) |p| main.allocator.destroy(p);
-        self.path.deinit();
-        self.path_indices.deinit();
-        main.allocator.destroy(self);
-    }
-};
-
-// Context that is currently being used for scanning.
-var active_context: *Context = undefined;
-
-
 // The following filesystem scanning implementation is designed to support
 // some degree of parallelism while generating a serialized tree without
 // consuming ~too~ much memory.
@@ -468,9 +496,10 @@ var active_context: *Context = undefined;
 // filesystem in the required order and lose some opportunities for
 // parallelism. This is an attempt at doing the latter.
 const scanner = struct {
-    var tail: *Level = undefined;
+    var tail: *Dir = undefined;
+    var head: *Dir = undefined;
     // Currently used to protect both the scan stack state and the output
-    // Context, may be worth trying to split in two.
+    // context, may be worth trying to split in two.
     var lock = std.Thread.Mutex{};
     var cond = std.Thread.Condition{};
 
@@ -492,100 +521,66 @@ const scanner = struct {
 
     const SpecialEntry = struct {
         name: [:0]u8,
-        t: Context.Special,
+        t: Special,
     };
 
-    const NextLevel = struct {
+    const NextDir = struct {
         name: [:0]u8,
         stat: Stat,
-        level: *Level, // XXX: Only 'dir', 'names', and 'specials' are really relevant here
+        fd: std.fs.Dir,
+        names: std.ArrayListUnmanaged([:0]u8) = .{},
+        specials: std.ArrayListUnmanaged(SpecialEntry) = .{},
+        list_error: bool = false,
     };
 
     // Represents a directory that is being scanned.
-    const Level = struct {
-        dir: std.fs.Dir,
+    const Dir = struct {
+        lvl: Level = undefined,
+        fd: std.fs.Dir,
         dir_dev: u64,
-        dirListError: bool = false,
         names: std.ArrayListUnmanaged([:0]u8) = .{}, // Queue of names to stat()
         names_busy: u8 = 0, // Number of threads running stat()
-        files: std.ArrayListUnmanaged(StatEntry) = .{}, // Queue of files we can output
-        specials: std.ArrayListUnmanaged(SpecialEntry) = .{}, // Queue of "special" items we can output
         dirs: std.ArrayListUnmanaged(StatEntry) = .{}, // Queue of dirs we can read
         dirs_busy: u8 = 0, // Number of 'dirs' being processed at the moment
-        next: std.ArrayListUnmanaged(NextLevel) = .{}, // Queue of subdirs to scan next
-        sub: ?*Level = null, // Subdirectory currently being scanned
-        parent: ?*Level,
+        next: std.ArrayListUnmanaged(NextDir) = .{}, // Queue of subdirs to scan next
 
         // Assumption: all queues are empty
-        fn destroy(lvl: *Level) void {
-            lvl.dir.close();
-            lvl.names.deinit(main.allocator);
-            lvl.files.deinit(main.allocator);
-            lvl.specials.deinit(main.allocator);
-            lvl.dirs.deinit(main.allocator);
-            lvl.next.deinit(main.allocator);
-            main.allocator.destroy(lvl);
+        fn destroy(dir: *Dir) void {
+            dir.fd.close();
+            dir.names.deinit(main.allocator);
+            dir.dirs.deinit(main.allocator);
+            dir.next.deinit(main.allocator);
+            main.allocator.destroy(dir);
         }
     };
-
-    // Drain the output queue ('files', 'specials') if we can.
-    // Assumes we hold the lock.
-    fn outputQueue(lvl: *Level) void {
-        if (lvl.sub != null) return;
-
-        if (lvl.dirListError) {
-            active_context.setDirlistError();
-            lvl.dirListError = false;
-        }
-
-        for (lvl.specials.items) |e| {
-            active_context.stat.dir = false;
-            active_context.pushPath(e.name);
-            active_context.addSpecial(e.t);
-            active_context.popPath();
-            main.allocator.free(e.name);
-        }
-        for (lvl.files.items) |e| {
-            // TODO: ctx API is inefficient here, no need to copy that Stat
-            active_context.stat.dir = false;
-            active_context.pushPath(e.name);
-            active_context.stat = e.stat;
-            active_context.addStat(lvl.dir_dev);
-            active_context.popPath();
-            main.allocator.free(e.name);
-        }
-        lvl.specials.clearRetainingCapacity();
-        lvl.files.clearRetainingCapacity();
-    }
 
     // Leave the current dir if we're done with it and find a new dir to enter.
     fn navigate() void {
         //std.debug.print("ctx={s}, names={} dirs={} next={}\n", .{ active_context.path.items, tail.names.items.len, tail.dirs.items.len, tail.next.items.len });
 
-        // Assumption: outputQueue() has been called on the tail, so
-        // 'files' and 'specials' are always empty.
-        while (tail.parent != null and tail.sub == null
+        while (tail != head
             and tail.names.items.len == 0 and tail.names_busy == 0
             and tail.dirs.items.len == 0 and tail.dirs_busy == 0
             and tail.next.items.len == 0
         ) {
             //std.debug.print("Pop\n", .{});
-            active_context.popPath();
-            const lvl = tail;
-            lvl.parent.?.sub = null;
-            tail = lvl.parent.?;
-            lvl.destroy();
-            outputQueue(tail);
+            const dir = tail;
+            tail = @fieldParentPtr(Dir, "lvl", dir.lvl.parent.?);
+            dir.lvl.close();
+            dir.destroy();
         }
-        if (tail.sub == null and tail.next.items.len > 0) {
-            const sub = tail.next.pop();
-            //std.debug.print("Push {s}\n", .{sub.name});
-            active_context.pushPath(sub.name);
-            active_context.stat = sub.stat;
-            active_context.addStat(tail.dir_dev);
-            main.allocator.free(sub.name);
-            tail.sub = sub.level;
-            tail = sub.level;
+        if (tail.next.items.len > 0) {
+            var next_sub = tail.next.pop();
+            var sub = main.allocator.create(Dir) catch unreachable;
+            sub.* = .{
+                .fd = next_sub.fd,
+                .dir_dev = next_sub.stat.dev,
+                .names = next_sub.names,
+            };
+            tail.lvl.addDir(next_sub.name, &next_sub.stat, next_sub.list_error, &sub.lvl);
+            outputNextDirSpecials(&next_sub, &sub.lvl);
+            main.allocator.free(next_sub.name);
+            tail = sub;
         }
 
         // TODO: Only wake up threads when there's enough new work queued, all
@@ -593,88 +588,94 @@ const scanner = struct {
         cond.broadcast();
     }
 
-    fn readNamesDir(lvl: *Level) void {
-        var it = lvl.dir.iterate();
+    fn readNamesDir(dir: *NextDir) void {
+        var it = dir.fd.iterate();
         while (true) {
             const entry = it.next() catch {
-                lvl.dirListError = true;
+                dir.list_error = true;
                 break;
             } orelse break;
 
             // TODO: Check for exclude patterns
 
-            lvl.names.append(main.allocator, main.allocator.dupeZ(u8, entry.name) catch unreachable) catch unreachable;
+            dir.names.append(main.allocator, main.allocator.dupeZ(u8, entry.name) catch unreachable) catch unreachable;
         }
     }
 
-    fn readNames(parent: *Level) void {
+    fn outputNextDirSpecials(dir: *NextDir, lvl: *Level) void {
+        for (dir.specials.items) |e| {
+            lvl.addSpecial(e.name, e.t, false);
+            main.allocator.free(e.name);
+        }
+        dir.specials.deinit(main.allocator);
+    }
+
+    fn readNames(parent: *Dir) void {
         const stat = parent.dirs.pop();
         lock.unlock();
 
-        var dir = parent.dir.openDirZ(stat.name, .{ .access_sub_paths = true, .iterate = true, .no_follow = true }) catch {
+        var fd = parent.fd.openDirZ(stat.name, .{ .access_sub_paths = true, .iterate = true, .no_follow = true }) catch {
             lock.lock();
-            parent.specials.append(main.allocator, .{ .name = stat.name, .t = .err }) catch unreachable;
+            parent.lvl.addSpecial(stat.name, .err, true);
+            main.allocator.free(stat.name);
             return;
         };
 
-        if (@import("builtin").os.tag == .linux and main.config.exclude_kernfs and isKernfs(dir, stat.stat.dev)) {
+        if (@import("builtin").os.tag == .linux and main.config.exclude_kernfs and isKernfs(fd, stat.stat.dev)) {
             lock.lock();
-            parent.specials.append(main.allocator, .{ .name = stat.name, .t = .kernfs }) catch unreachable;
+            parent.lvl.addSpecial(stat.name, .kernfs, true);
+            main.allocator.free(stat.name);
             return;
         }
 
         if (main.config.exclude_caches) {
-            if (dir.openFileZ("CACHEDIR.TAG", .{})) |f| {
+            if (fd.openFileZ("CACHEDIR.TAG", .{})) |f| {
                 const sig = "Signature: 8a477f597d28d172789f06886806bc55";
                 var buf: [sig.len]u8 = undefined;
                 if (f.reader().readAll(&buf)) |len| {
                     if (len == sig.len and std.mem.eql(u8, &buf, sig)) {
                         lock.lock();
-                        parent.specials.append(main.allocator, .{ .name = stat.name, .t = .excluded }) catch unreachable;
+                        parent.lvl.addSpecial(stat.name, .excluded, true);
+                        main.allocator.free(stat.name);
                         return;
                     }
                 } else |_| {}
             } else |_| {}
         }
 
-        var lvl = main.allocator.create(Level) catch unreachable;
-        lvl.* = .{ .dir = dir, .dir_dev = stat.stat.dev, .parent = parent };
-        readNamesDir(lvl);
+        var dir = NextDir{ .name = stat.name, .fd = fd, .stat = stat.stat };
+        readNamesDir(&dir);
 
         lock.lock();
-        // Treat empty directories as files
-        if (lvl.names.items.len == 0 and lvl.specials.items.len == 0) {
-            if (lvl.dirListError) { // XXX: this loses information about this entry being a directory :(
-                parent.specials.append(main.allocator, .{ .name = stat.name, .t = .err }) catch unreachable;
-            } else
-                parent.files.append(main.allocator, stat) catch unreachable;
-            dir.close();
-            main.allocator.destroy(lvl);
+        if (dir.names.items.len == 0 and dir.specials.items.len == 0) {
+            parent.lvl.addFile(stat.name, &stat.stat, dir.list_error);
+            main.allocator.free(stat.name);
+            fd.close();
         } else {
-            parent.next.append(main.allocator, .{ .name = stat.name, .stat = stat.stat, .level = lvl }) catch unreachable;
+            parent.next.append(main.allocator, dir) catch unreachable;
         }
     }
 
-    fn statNames(lvl: *Level) void {
+    fn statNames(dir: *Dir) void {
         var names: [BATCH][:0]u8 = undefined;
         var stats: [BATCH]Stat = undefined;
         var errs: [BATCH]bool = undefined;
-        const len = std.math.min(names.len, lvl.names.items.len);
-        std.mem.copy([]u8, &names, lvl.names.items[lvl.names.items.len-len..]);
-        lvl.names.items.len -= len;
+        const len = std.math.min(names.len, dir.names.items.len);
+        std.mem.copy([]u8, &names, dir.names.items[dir.names.items.len-len..]);
+        dir.names.items.len -= len;
         lock.unlock();
 
         var i: usize = 0;
         while (i < len) : (i += 1) {
-            if (Stat.read(lvl.dir, names[i], false)) |s| {
+            if (Stat.read(dir.fd, names[i], false)) |s| {
                 errs[i] = false;
                 if (main.config.follow_symlinks and s.symlink) {
-                    if (Stat.read(lvl.dir, names[i], true)) |nstat| {
+                    if (Stat.read(dir.fd, names[i], true)) |nstat| {
                         if (!nstat.dir) {
                             stats[i] = nstat;
                             // Symlink targets may reside on different filesystems,
                             // this will break hardlink detection and counting so let's disable it.
-                            if (nstat.hlinkc and nstat.dev != lvl.dir_dev)
+                            if (nstat.hlinkc and nstat.dev != dir.dir_dev)
                                 stats[i].hlinkc = false;
                         }
                     } else |_| stats[i] = s;
@@ -687,46 +688,57 @@ const scanner = struct {
         lock.lock();
         i = 0;
         while (i < len) : (i += 1) {
-            if (errs[i])
-                lvl.specials.append(main.allocator, .{ .name = names[i], .t = .err }) catch unreachable
-            else if (main.config.same_fs and stats[i].dev != lvl.dir_dev)
-                lvl.specials.append(main.allocator, .{ .name = names[i], .t = .other_fs }) catch unreachable
-            else if (stats[i].dir)
-                lvl.dirs.append(main.allocator, .{ .name = names[i], .stat = stats[i] }) catch unreachable
-            else
-                lvl.files.append(main.allocator, .{ .name = names[i], .stat = stats[i] }) catch unreachable;
+            if (errs[i]) {
+                dir.lvl.addSpecial(names[i], .err, false);
+                main.allocator.free(names[i]);
+            } else if (main.config.same_fs and stats[i].dev != dir.dir_dev) {
+                dir.lvl.addSpecial(names[i], .other_fs, stats[i].dir);
+                main.allocator.free(names[i]);
+            } else if (stats[i].dir) {
+                dir.dirs.append(main.allocator, .{ .name = names[i], .stat = stats[i] }) catch unreachable;
+            } else {
+                dir.lvl.addFile(names[i], &stats[i], false);
+                main.allocator.free(names[i]);
+            }
         }
     }
 
-    fn runThread() void {
+    fn runThread(main_thread: bool) void {
         lock.lock();
         outer: while (true) {
-            var curlvl: ?*Level = tail;
-            while (curlvl) |lvl| : (curlvl = lvl.parent) {
 
+            if (main_thread and (items_seen & 128) == 0) {
+                lock.unlock();
+                main.handleEvent(false, false);
+                lock.lock();
+            }
+
+            var dir = tail;
+            while (true) {
                 // If we have subdirectories to read, do that first to keep the 'names' queues filled up.
-                if (lvl.dirs.items.len > 0 and lvl.dirs_busy + lvl.next.items.len < SUBDIRS_PER_LEVEL) {
-                    lvl.dirs_busy += 1;
-                    readNames(lvl);
-                    lvl.dirs_busy -= 1;
-                    outputQueue(lvl);
+                if (dir.dirs.items.len > 0 and dir.dirs_busy + dir.next.items.len < SUBDIRS_PER_LEVEL) {
+                    dir.dirs_busy += 1;
+                    readNames(dir);
+                    dir.dirs_busy -= 1;
                     navigate();
                     continue :outer;
                 }
 
                 // Then look for names to stat
-                if (lvl.names.items.len > 0) {
-                    lvl.names_busy += 1;
-                    statNames(lvl);
-                    lvl.names_busy -= 1;
-                    outputQueue(lvl);
+                if (dir.names.items.len > 0) {
+                    dir.names_busy += 1;
+                    statNames(dir);
+                    dir.names_busy -= 1;
                     navigate();
                     continue :outer;
                 }
+
+                if (dir == head) break
+                else dir = @fieldParentPtr(Dir, "lvl", dir.lvl.parent.?);
             }
 
             // If we're here, then we found no work to do.
-            if (tail.parent == null and tail.dirs_busy == 0 and tail.names_busy == 0) {
+            if (tail == head and tail.dirs_busy == 0 and tail.names_busy == 0) {
                 cond.broadcast(); // only necessary if we don't always wake up threads when there's work to do.
                 break;
             }
@@ -734,63 +746,70 @@ const scanner = struct {
         }
         lock.unlock();
     }
-    // TODO: progress UI
 
-    // Scan the given dir. The active_context is assumed to have been
-    // initialized already and the entry for the given *dir has already been
-    // output.
-    // The given dir is closed when done.
-    fn scan(dir: std.fs.Dir, dir_dev: u64) void {
-        tail = main.allocator.create(Level) catch unreachable;
-        tail.* = .{ .dir = dir, .dir_dev = dir_dev, .parent = null };
-        readNamesDir(tail);
+    // Open the given path and scan it into *Dir.
+    fn scan(dir: *Dir, path: [:0]const u8) void {
+        tail = dir;
+        head = dir;
+        dir.fd = std.fs.cwd().openDirZ(path, .{ .access_sub_paths = true, .iterate = true }) catch |e| {
+            last_error.appendSlice(path) catch unreachable;
+            fatal_error = e;
+            while (main.state == .refresh or main.state == .scan)
+                main.handleEvent(true, true);
+            return;
+        };
+
+        var next_dir = NextDir{ .name = undefined, .stat = undefined, .fd = dir.fd };
+        readNamesDir(&next_dir);
+        outputNextDirSpecials(&next_dir, &dir.lvl);
+        dir.names = next_dir.names;
+
         var threads = main.allocator.alloc(std.Thread, main.config.parallel-1) catch unreachable;
-        for (threads) |*t| t.* = std.Thread.spawn(.{ .stack_size = 128*1024 }, runThread, .{}) catch unreachable;
-        runThread();
+        for (threads) |*t| t.* = std.Thread.spawn(.{ .stack_size = 128*1024 }, runThread, .{false}) catch unreachable;
+        runThread(true);
         for (threads) |*t| t.join();
-        tail.destroy();
+        main.allocator.free(threads);
+        head.lvl.close();
+        head.destroy();
+        head = undefined;
         tail = undefined;
     }
 };
 
 
-pub fn scanRoot(path: []const u8, out: ?std.fs.File) !void {
-    active_context = if (out) |f| Context.initFile(f) else Context.initMem(null);
+pub fn scanRoot(orig_path: [:0]const u8, out: ?std.fs.File) !void {
+    var lvl: Level = undefined;
+    if (out) |f| initFile(f, &lvl) else initMem(null, &lvl);
 
-    const full_path = std.fs.realpathAlloc(main.allocator, path) catch null;
+    var buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    const full_path =
+        if (std.os.realpathZ(orig_path, &buf)) |p| main.allocator.dupeZ(u8, p) catch unreachable
+        else |_| null;
     defer if (full_path) |p| main.allocator.free(p);
-    active_context.pushPath(full_path orelse path);
+    const path = full_path orelse orig_path;
 
-    active_context.stat = try Stat.read(std.fs.cwd(), active_context.pathZ(), true);
-    if (!active_context.stat.dir) return error.NotDir;
-    active_context.addStat(0);
-    scan();
+    const stat = try Stat.read(std.fs.cwd(), path, true);
+    if (!stat.dir) return error.NotDir;
+
+    var sub = main.allocator.create(scanner.Dir) catch unreachable;
+    sub.* = .{ .fd = undefined, .dir_dev = undefined };
+    lvl.addDir(path, &stat, false, &sub.lvl);
+    sub.dir_dev = stat.dev;
+    scanner.scan(sub, path);
+    lvl.close();
 }
 
-pub fn setupRefresh(parent: *model.Dir) void {
-    active_context = Context.initMem(parent);
+pub fn refresh(parent: *model.Dir) void {
     var full_path = std.ArrayList(u8).init(main.allocator);
     defer full_path.deinit();
     parent.fmtPath(true, &full_path);
-    active_context.pushPath(full_path.items);
-    active_context.stat.dir = true;
-    active_context.stat.dev = model.devices.list.items[parent.dev];
+
+    var sub = main.allocator.create(scanner.Dir) catch unreachable;
+    sub.* = .{ .fd = undefined, .dir_dev = model.devices.list.items[parent.dev] };
+    initMem(parent, &sub.lvl);
+    scanner.scan(sub, util.arrayListBufZ(&full_path));
 }
 
-// To be called after setupRefresh() (or from scanRoot())
-pub fn scan() void {
-    defer active_context.deinit();
-    var dir = std.fs.cwd().openDirZ(active_context.pathZ(), .{ .access_sub_paths = true, .iterate = true }) catch |e| {
-        active_context.last_error = main.allocator.dupeZ(u8, active_context.path.items) catch unreachable;
-        active_context.fatal_error = e;
-        while (main.state == .refresh or main.state == .scan)
-            main.handleEvent(true, true);
-        return;
-    };
-    scanner.scan(dir, active_context.stat.dev);
-    active_context.popPath();
-    active_context.final();
-}
 
 // Using a custom recursive descent JSON parser here. std.json is great, but
 // has two major downsides:
@@ -803,8 +822,6 @@ pub fn scan() void {
 // worth factoring out the JSON parts into a separate abstraction for which
 // tests can be written.
 const Import = struct {
-    ctx: *Context,
-
     rd: std.fs.File,
     rdoff: usize = 0,
     rdsize: usize = 0,
@@ -814,6 +831,8 @@ const Import = struct {
     byte: u64 = 1,
     line: u64 = 1,
     namebuf: [32*1024]u8 = undefined,
+    statbuf: Stat = undefined,
+    root_level: Level = undefined,
 
     const Self = @This();
 
@@ -994,22 +1013,22 @@ const Import = struct {
         }
     }
 
-    fn itemkey(self: *Self, key: []const u8, name: *?[]u8, special: *?Context.Special) void {
+    fn itemkey(self: *Self, key: []const u8, name: *?[]u8, special: *?Special) void {
         const eq = std.mem.eql;
         switch (if (key.len > 0) key[0] else @as(u8,0)) {
             'a' => {
                 if (eq(u8, key, "asize")) {
-                    self.ctx.stat.size = self.uint(u64);
+                    self.statbuf.size = self.uint(u64);
                     return;
                 }
             },
             'd' => {
                 if (eq(u8, key, "dsize")) {
-                    self.ctx.stat.blocks = @intCast(model.Blocks, self.uint(u64)>>9);
+                    self.statbuf.blocks = @intCast(model.Blocks, self.uint(u64)>>9);
                     return;
                 }
                 if (eq(u8, key, "dev")) {
-                    self.ctx.stat.dev = self.uint(u64);
+                    self.statbuf.dev = self.uint(u64);
                     return;
                 }
             },
@@ -1026,29 +1045,29 @@ const Import = struct {
             },
             'g' => {
                 if (eq(u8, key, "gid")) {
-                    self.ctx.stat.ext.gid = self.uint(u32);
+                    self.statbuf.ext.gid = self.uint(u32);
                     return;
                 }
             },
             'h' => {
                 if (eq(u8, key, "hlnkc")) {
-                    self.ctx.stat.hlinkc = self.boolean();
+                    self.statbuf.hlinkc = self.boolean();
                     return;
                 }
             },
             'i' => {
                 if (eq(u8, key, "ino")) {
-                    self.ctx.stat.ino = self.uint(u64);
+                    self.statbuf.ino = self.uint(u64);
                     return;
                 }
             },
             'm' => {
                 if (eq(u8, key, "mode")) {
-                    self.ctx.stat.ext.mode = self.uint(u16);
+                    self.statbuf.ext.mode = self.uint(u16);
                     return;
                 }
                 if (eq(u8, key, "mtime")) {
-                    self.ctx.stat.ext.mtime = self.uint(u64);
+                    self.statbuf.ext.mtime = self.uint(u64);
                     // Accept decimal numbers, but discard the fractional part because our data model doesn't support it.
                     if (self.ch == '.') {
                         self.con();
@@ -1066,13 +1085,13 @@ const Import = struct {
                     return;
                 }
                 if (eq(u8, key, "nlink")) {
-                    self.ctx.stat.nlink = self.uint(u31);
-                    if (!self.ctx.stat.dir and self.ctx.stat.nlink > 1)
-                        self.ctx.stat.hlinkc = true;
+                    self.statbuf.nlink = self.uint(u31);
+                    if (!self.statbuf.dir and self.statbuf.nlink > 1)
+                        self.statbuf.hlinkc = true;
                     return;
                 }
                 if (eq(u8, key, "notreg")) {
-                    self.ctx.stat.reg = !self.boolean();
+                    self.statbuf.reg = !self.boolean();
                     return;
                 }
             },
@@ -1085,7 +1104,7 @@ const Import = struct {
             },
             'u' => {
                 if (eq(u8, key, "uid")) {
-                    self.ctx.stat.ext.uid = self.uint(u32);
+                    self.statbuf.ext.uid = self.uint(u32);
                     return;
                 }
             },
@@ -1094,11 +1113,11 @@ const Import = struct {
         self.conval();
     }
 
-    fn iteminfo(self: *Self, dir_dev: u64) void {
+    fn iteminfo(self: *Self, dir_dev: u64, lvl: *Level, sub: *Level) void {
         if (self.next() != '{') self.die("expected '{'");
-        self.ctx.stat.dev = dir_dev;
+        self.statbuf.dev = dir_dev;
         var name: ?[]u8 = null;
-        var special: ?Context.Special = null;
+        var special: ?Special = null;
         while (true) {
             self.conws();
             var keybuf: [32]u8 = undefined;
@@ -1114,38 +1133,38 @@ const Import = struct {
                 else => self.die("expected ',' or '}'"),
             }
         }
-        if (name) |n| self.ctx.pushPath(n)
-        else self.die("missing \"name\" field");
-        if (special) |s| self.ctx.addSpecial(s)
-        else self.ctx.addStat(dir_dev);
+        const nname = name orelse self.die("missing \"name\" field");
+        if (self.statbuf.dir) lvl.addDir(nname, &self.statbuf, if (special) |s| s == .err else false, sub)
+        else if (special) |s| lvl.addSpecial(nname, s, self.statbuf.dir)
+        else lvl.addFile(nname, &self.statbuf, false);
     }
 
-    fn item(self: *Self, dev: u64) void {
-        self.ctx.stat = .{};
+    fn item(self: *Self, lvl: *Level, dev: u64) void {
+        self.statbuf = .{};
         var isdir = false;
         if (self.ch == '[') {
             isdir = true;
-            self.ctx.stat.dir = true;
+            self.statbuf.dir = true;
             self.con();
             self.conws();
         }
 
-        self.iteminfo(dev);
+        var sub: Level = undefined;
+        self.iteminfo(dev, lvl, &sub);
 
         self.conws();
         if (isdir) {
-            const ndev = self.ctx.stat.dev;
             while (self.ch == ',') {
                 self.con();
                 self.conws();
-                self.item(ndev);
+                self.item(&sub, self.statbuf.dev);
                 self.conws();
             }
             if (self.next() != ']') self.die("expected ',' or ']'");
+            sub.close();
         }
-        self.ctx.popPath();
 
-        if ((self.ctx.items_seen & 1023) == 0)
+        if ((items_seen & 1023) == 0)
             main.handleEvent(false, false);
     }
 
@@ -1170,7 +1189,7 @@ const Import = struct {
         self.conws();
         // root element
         if (self.ch != '[') self.die("expected '['"); // top-level entry must be a dir
-        self.item(0);
+        self.item(&self.root_level, 0);
         self.conws();
         // any trailing elements
         while (self.ch == ',') {
@@ -1191,12 +1210,14 @@ pub fn importRoot(path: [:0]const u8, out: ?std.fs.File) void {
                   catch |e| ui.die("Error reading file: {s}.\n", .{ui.errorString(e)});
     defer fd.close();
 
-    active_context = if (out) |f| Context.initFile(f) else Context.initMem(null);
-    var imp = Import{ .ctx = active_context, .rd = fd };
-    defer imp.ctx.deinit();
+    var imp = Import{ .rd = fd };
+    if (out) |f| initFile(f, &imp.root_level)
+    else initMem(null, &imp.root_level);
     imp.root();
-    imp.ctx.final();
+    imp.root_level.close();
 }
+
+
 
 var animation_pos: u32 = 0;
 var counting_hardlinks: bool = false;
@@ -1208,7 +1229,7 @@ fn drawError(err: anyerror) void {
 
     box.move(2, 2);
     ui.addstr("Path: ");
-    ui.addstr(ui.shorten(ui.toUtf8(active_context.last_error.?), width -| 10));
+    ui.addstr(ui.shorten(ui.toUtf8(util.arrayListBufZ(&last_error)), width -| 10));
 
     box.move(3, 2);
     ui.addstr("Error: ");
@@ -1226,33 +1247,41 @@ fn drawCounting() void {
 
 fn drawBox() void {
     ui.init();
-    const ctx = active_context;
-    if (ctx.fatal_error) |err| return drawError(err);
+    if (fatal_error) |err| return drawError(err);
     if (counting_hardlinks) return drawCounting();
+
+    scanner.lock.lock();
+    defer scanner.lock.unlock();
+
     const width = ui.cols -| 5;
     const box = ui.Box.create(10, width, "Scanning...");
     box.move(2, 2);
     ui.addstr("Total items: ");
-    ui.addnum(.default, ctx.items_seen);
+    ui.addnum(.default, items_seen);
 
-    if (width > 48 and ctx.parents != null) {
+    if (width > 48 and items_seen > 0) {
         box.move(2, 30);
         ui.addstr("size: ");
         // TODO: Should display the size of the dir-to-be-refreshed on refreshing, not the root.
         ui.addsize(.default, util.blocksToSize(model.root.entry.blocks +| model.inodes.total_blocks));
     }
 
-    box.move(3, 2);
-    ui.addstr("Current item: ");
-    ui.addstr(ui.shorten(ui.toUtf8(ctx.pathZ()), width -| 18));
+    if (last_level) |l| {
+        box.move(3, 2);
+        ui.addstr("Current dir: ");
+        var path = std.ArrayList(u8).init(main.allocator);
+        defer path.deinit();
+        l.fmtPath(&path);
+        ui.addstr(ui.shorten(ui.toUtf8(util.arrayListBufZ(&path)), width -| 18));
+    }
 
-    if (ctx.last_error) |path| {
+    if (last_error.items.len > 0) {
         box.move(5, 2);
         ui.style(.bold);
         ui.addstr("Warning: ");
         ui.style(.default);
         ui.addstr("error scanning ");
-        ui.addstr(ui.shorten(ui.toUtf8(path), width -| 28));
+        ui.addstr(ui.shorten(ui.toUtf8(util.arrayListBufZ(&last_error)), width -| 28));
         box.move(6, 3);
         ui.addstr("some directory sizes may not be correct.");
     }
@@ -1292,24 +1321,33 @@ fn drawBox() void {
 }
 
 pub fn draw() void {
-    if (active_context.fatal_error != null and main.config.scan_ui.? != .full)
-        ui.die("Error reading {s}: {s}\n", .{ active_context.last_error.?, ui.errorString(active_context.fatal_error.?) });
+    if (fatal_error != null and main.config.scan_ui.? != .full)
+        ui.die("Error reading {s}: {s}\n", .{ last_error.items, ui.errorString(fatal_error.?) });
     switch (main.config.scan_ui.?) {
         .none => {},
         .line => {
             var buf: [256]u8 = undefined;
             var line: []const u8 = undefined;
-            if (counting_hardlinks) {
-                line = "\x1b7\x1b[JCounting hardlinks...\x1b8";
-            } else if (active_context.parents == null) {
-                line = std.fmt.bufPrint(&buf, "\x1b7\x1b[J{s: <63} {d:>9} files\x1b8",
-                    .{ ui.shorten(active_context.pathZ(), 63), active_context.items_seen }
-                ) catch return;
-            } else {
-                const r = ui.FmtSize.fmt(util.blocksToSize(model.root.entry.blocks));
-                line = std.fmt.bufPrint(&buf, "\x1b7\x1b[J{s: <51} {d:>9} files / {s}{s}\x1b8",
-                    .{ ui.shorten(active_context.pathZ(), 51), active_context.items_seen, r.num(), r.unit }
-                ) catch return;
+            {
+                scanner.lock.lock();
+                defer scanner.lock.unlock();
+                var path = std.ArrayList(u8).init(main.allocator);
+                defer path.deinit();
+                if (last_level) |l| l.fmtPath(&path);
+                const pathZ = util.arrayListBufZ(&path);
+
+                if (counting_hardlinks) {
+                    line = "\x1b7\x1b[JCounting hardlinks...\x1b8";
+                } else if (file_writer != null) {
+                    line = std.fmt.bufPrint(&buf, "\x1b7\x1b[J{s: <63} {d:>9} files\x1b8",
+                        .{ ui.shorten(pathZ, 63), items_seen }
+                    ) catch return;
+                } else {
+                    const r = ui.FmtSize.fmt(util.blocksToSize(model.root.entry.blocks));
+                    line = std.fmt.bufPrint(&buf, "\x1b7\x1b[J{s: <51} {d:>9} files / {s}{s}\x1b8",
+                        .{ ui.shorten(pathZ, 51), items_seen, r.num(), r.unit }
+                    ) catch return;
+                }
             }
             _ = std.io.getStdErr().write(line) catch {};
         },
@@ -1318,7 +1356,7 @@ pub fn draw() void {
 }
 
 pub fn keyInput(ch: i32) void {
-    if (active_context.fatal_error != null) {
+    if (fatal_error != null) {
         if (main.state == .scan) ui.quit()
         else main.state = .browse;
         return;

@@ -428,7 +428,7 @@ pub fn main() void {
         }
     }
 
-    var scan_dir: ?[]const u8 = null;
+    var scan_dir: ?[:0]const u8 = null;
     var import_file: ?[:0]const u8 = null;
     var export_file: ?[:0]const u8 = null;
     {
@@ -499,7 +499,7 @@ pub fn main() void {
     while (true) {
         switch (state) {
             .refresh => {
-                scan.scan();
+                scan.refresh(browser.dir_parent);
                 state = .browse;
                 browser.loadDir(null);
             },
