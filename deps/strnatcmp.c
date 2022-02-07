@@ -28,35 +28,22 @@
  * Eric Sosman pointed out that ctype functions take a parameter whose
  * value must be that of an unsigned int, even on platforms that have
  * negative chars in their default char type.
+ *
+ * ncdu edits:
+ * - static inline -> #define for better compatibility
+ * - don't use ctype.h, for more predictable results
  */
 
 #include <stddef.h>	/* size_t */
-#include <ctype.h>
 
 #include "strnatcmp.h"
 
 
 /* These are defined as macros to make it easier to adapt this code to
  * different characters types or comparison functions. */
-static inline int
-nat_isdigit(nat_char a)
-{
-     return isdigit((unsigned char) a);
-}
-
-
-static inline int
-nat_isspace(nat_char a)
-{
-     return isspace((unsigned char) a);
-}
-
-
-static inline nat_char
-nat_toupper(nat_char a)
-{
-     return toupper((unsigned char) a);
-}
+#define nat_isdigit(a) ((a) >= '0' && (a) <= '9')
+#define nat_isspace(a) ((a) == ' ' || (a) == '\t' || (a) == '\r' || (a) == '\n')
+#define nat_toupper(a) (a)
 
 
 static int

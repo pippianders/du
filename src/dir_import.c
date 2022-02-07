@@ -465,7 +465,7 @@ static int iteminfo(void) {
       C(rint64(&iv, UINT64_MAX));
       ctx->buf_dir->flags |= FF_EXT;
       ctx->buf_ext->mtime = iv;
-      // Accept decimal numbers, but discard the fractional part because our data model doesn't support it.
+      /* Accept decimal numbers, but discard the fractional part because our data model doesn't support it. */
       if(*ctx->buf == '.') {
           con(1);
           while(*ctx->buf >= '0' && *ctx->buf <= '9')

@@ -127,7 +127,7 @@ static int item(struct dir *dir, const char *name, struct dir_ext *ext, unsigned
   item = xmalloc(dir->flags & FF_EXT ? dir_ext_memsize(name) : dir_memsize(name));
   memcpy(item, dir, offsetof(struct dir, name));
   strcpy(item->name, name);
-  if(dir->flags & FF_EXT)
+  if(item->flags & FF_EXT)
     memcpy(dir_ext_ptr(item), ext, sizeof(struct dir_ext));
 
   item_add(item);

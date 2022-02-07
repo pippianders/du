@@ -1,10 +1,11 @@
 
 AC_INIT([ncdu],[1.16],[projects@yorhel.nl])
 AC_CONFIG_SRCDIR([src/global.h])
-AC_CONFIG_HEADER([config.h])
+AC_CONFIG_HEADERS([config.h])
 AM_INIT_AUTOMAKE([foreign std-options subdir-objects])
 
 # Check for programs.
+AC_USE_SYSTEM_EXTENSIONS
 AC_PROG_CC
 AC_PROG_INSTALL
 AC_PROG_RANLIB
@@ -22,6 +23,8 @@ AC_TYPE_INT64_T
 AC_TYPE_UINT64_T
 AC_SYS_LARGEFILE
 AC_STRUCT_ST_BLOCKS
+AC_C_INLINE
+AC_C_FLEXIBLE_ARRAY_MEMBER
 
 # Check for library functions.
 AC_CHECK_FUNCS(

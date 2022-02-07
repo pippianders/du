@@ -70,7 +70,7 @@ struct dir {
   struct dir *parent, *next, *prev, *sub, *hlnk;
   int items;
   unsigned short flags;
-  char name[];
+  char name[FLEXIBLE_ARRAY_MEMBER];
 };
 
 /* A note on the ino and dev fields above: ino is usually represented as ino_t,

@@ -45,6 +45,8 @@ EXTRA_DIST=ncdu.1 doc/ncdu.pod
 ncdu.1: $(srcdir)/doc/ncdu.pod
 	pod2man --center "ncdu manual" --release "@PACKAGE@-@VERSION@" "$(srcdir)/doc/ncdu.pod" >ncdu.1
 
+# This target exists more for documentation purposes than actual use; some
+# dependencies have minor ncdu-specific changes.
 update-deps:
 	wget -q https://raw.github.com/attractivechaos/klib/master/khashl.h -O "$(srcdir)/deps/khashl.h"
 	wget -q http://g.blicky.net/ylib.git/plain/yopt.h -O "$(srcdir)/deps/yopt.h"
