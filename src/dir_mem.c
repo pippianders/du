@@ -45,13 +45,13 @@ static hl_t *links = NULL;
 /* recursively checks a dir structure for hard links and fills the lookup array */
 static void hlink_init(struct dir *d) {
   struct dir *t;
+  int r;
 
   for(t=d->sub; t!=NULL; t=t->next)
     hlink_init(t);
 
   if(!(d->flags & FF_HLNKC))
     return;
-  int r;
   hl_put(links, d, &r);
 }
 

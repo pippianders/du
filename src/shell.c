@@ -36,10 +36,11 @@
 
 static void set_level(void) {
   static int done = 0;
+  const char *lvl;
   char nlvl[2];
   if(done)
     return;
-  const char *lvl = getenv("NCDU_LEVEL");
+  lvl = getenv("NCDU_LEVEL");
   /* too lazy to count beyond 9 */
   if(lvl && *lvl >= '1' && *lvl < '9' && lvl[1] == 0) {
     nlvl[0] = 1 + *lvl;

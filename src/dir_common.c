@@ -77,13 +77,14 @@ void dir_curpath_leave() {
 
 
 void dir_setlasterr(const char *path) {
+  int req;
   if(!path) {
     free(lasterr);
     lasterr = NULL;
     lasterrl = 0;
     return;
   }
-  int req = strlen(path)+1;
+  req = strlen(path)+1;
   if(lasterrl < req) {
     lasterrl = req;
     lasterr = xrealloc(lasterr, lasterrl);
@@ -93,12 +94,12 @@ void dir_setlasterr(const char *path) {
 
 
 void dir_seterr(const char *fmt, ...) {
+  va_list va;
   free(dir_fatalerr);
   dir_fatalerr = NULL;
   if(!fmt)
     return;
 
-  va_list va;
   va_start(va, fmt);
   dir_fatalerr = xmalloc(1024); /* Should be enough for everything... */
   vsnprintf(dir_fatalerr, 1023, fmt, va);

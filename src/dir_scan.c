@@ -164,6 +164,7 @@ static char *dir_read(int *err) {
   buf = xmalloc(buflen);
 
   while(1) {
+    size_t len, req;
     errno = 0;
     if ((item = readdir(dir)) == NULL) {
       if(errno)
@@ -172,7 +173,8 @@ static char *dir_read(int *err) {
     }
     if(item->d_name[0] == '.' && (item->d_name[1] == 0 || (item->d_name[1] == '.' && item->d_name[2] == 0)))
       continue;
-    size_t len = strlen(item->d_name), req = off+3+len;
+    len = strlen(item->d_name);
+    req = off+3+len;
     if(req > buflen) {
       buflen = req < buflen*2 ? buflen*2 : req;
       buf = xrealloc(buf, buflen);

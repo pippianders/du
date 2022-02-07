@@ -147,10 +147,13 @@ char *fmtmode(unsigned short mode) {
 
 
 void read_locale() {
+#ifdef HAVE_LOCALE_H
+  char *locale_thou_sep;
+#endif
   thou_sep = '.';
 #ifdef HAVE_LOCALE_H
   setlocale(LC_ALL, "");
-  char *locale_thou_sep = localeconv()->thousands_sep;
+  locale_thou_sep = localeconv()->thousands_sep;
   if(locale_thou_sep && 1 == strlen(locale_thou_sep))
     thou_sep = locale_thou_sep[0];
 #endif

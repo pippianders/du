@@ -122,8 +122,6 @@ static void argv_parse(int argc, char **argv) {
   char *import = NULL;
   char *dir = NULL;
 
-  uic_theme = getenv("NO_COLOR") ? 0 : 2;
-
   static yopt_opt_t opts[] = {
     { 'h', 0, "-h,-?,--help" },
     { 'q', 0, "-q" },
@@ -148,6 +146,8 @@ static void argv_parse(int argc, char **argv) {
     { 'c', 1, "--color" },
     {0,0,NULL}
   };
+
+  uic_theme = getenv("NO_COLOR") ? 0 : 2;
 
   dir_ui = -1;
   si = 0;

@@ -71,10 +71,10 @@ static void browse_draw_info(struct dir *dr) {
     ncaddstr(4,  9, dr->flags & FF_DIR ? "Directory" : dr->flags & FF_FILE ? "File" : "Other");
 
     if(e) {
+      time_t t = (time_t)e->mtime;
       ncaddstr(4, 9, fmtmode(e->mode));
       ncprint(4, 26, "%d", e->uid);
       ncprint(4, 38, "%d", e->gid);
-      time_t t = (time_t)e->mtime;
       strftime(mbuf, sizeof(mbuf), "%Y-%m-%d %H:%M:%S %z", localtime(&t));
       ncaddstr(5, 18, mbuf);
     }
