@@ -238,7 +238,7 @@ const Row = struct {
                 ui.addstr(switch (main.config.graph_style) {
                     .hash  => ([_][:0]const u8{ " ", " ", " ", " ", " ", " ", " ", " ", "#" })[frac],
                     .half  => ([_][:0]const u8{ " ", " ", " ", " ", "▌", "▌", "▌", "▌", "█" })[frac],
-                    .eigth => ([_][:0]const u8{ " ", "▏", "▎", "▍", "▌", "▋", "▊", "▉", "█" })[frac],
+                    .eighth => ([_][:0]const u8{ " ", "▏", "▎", "▍", "▌", "▋", "▊", "▉", "█" })[frac],
                 });
                 num -|= perblock;
             }
