@@ -186,7 +186,7 @@ fn argConfig(args: *Args, opt: Args.Option) bool {
         const val = args.arg();
         if (std.mem.eql(u8, val, "hash")) config.graph_style = .hash
         else if (std.mem.eql(u8, val, "half-block")) config.graph_style = .half
-        else if (std.mem.eql(u8, val, "eighth-block")) config.graph_style = .eighth
+        else if (std.mem.eql(u8, val, "eighth-block") or std.mem.eql(u8, val, "eigth-block")) config.graph_style = .eighth
         else ui.die("Unknown --graph-style option: {s}.\n", .{val});
     } else if (opt.is("--sort")) {
         var val: []const u8 = args.arg();
