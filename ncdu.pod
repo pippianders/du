@@ -230,8 +230,8 @@ the browser with the 'g' key.
 =item B<--graph-style> I<OPTION>
 
 Change the way that the relative size bar column is drawn. Recognized values
-are I<hash> to draw ASCII C<#> characters (most portable), I<half-block> to use
-half-block drawing characters (the default) or I<eighth-block> to use
+are I<hash> to draw ASCII C<#> characters (default and most portable),
+I<half-block> to use half-block drawing characters or I<eighth-block> to use
 eighth-block drawing characters. Eighth-block characters are the most precise
 but may not render correctly in all terminals.
 
