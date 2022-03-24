@@ -379,8 +379,6 @@ const Context = struct {
     // Insert the current path as a special entry (i.e. a file/dir that is not counted)
     // Ignores self.stat except for the 'dir' option.
     fn addSpecial(self: *Self, t: Special) void {
-        std.debug.assert(self.items_seen > 0); // root item can't be a special
-
         if (t == .err) {
             if (self.last_error) |p| main.allocator.free(p);
             self.last_error = main.allocator.dupeZ(u8, self.path.items) catch unreachable;
