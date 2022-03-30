@@ -215,7 +215,7 @@ const Row = struct {
         ui.addch('[');
         if (main.config.show_percent) {
             self.bg.fg(.num);
-            ui.addprint("{d:>5.1}", .{ 100*
+            ui.addprint("{d:>5.1}", .{ 100 *
                 if (main.config.show_blocks) @intToFloat(f32, item.blocks) / @intToFloat(f32, std.math.max(1, dir_parent.entry.blocks))
                 else                         @intToFloat(f32, item.size)   / @intToFloat(f32, std.math.max(1, dir_parent.entry.size))
             });
