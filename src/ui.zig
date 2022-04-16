@@ -128,20 +128,21 @@ pub fn shorten(in: [:0]const u8, max_width: u32) [:0] const u8 {
     var total_width: u32 = 0;
     var prefix_width: u32 = 0;
     var prefix_end: u32 = 0;
+    var prefix_done = false;
     var it = std.unicode.Utf8View.initUnchecked(in).iterator();
     while (it.nextCodepoint()) |cp| {
         // XXX: libc assumption: wchar_t is a Unicode point. True for most modern libcs?
         // (The "proper" way is to use mbtowc(), but I'd rather port the musl wcwidth implementation to Zig so that I *know* it'll be Unicode.
         // On the other hand, ncurses also use wcwidth() so that would cause duplicated code. Ugh)
         const cp_width_ = c.wcwidth(cp);
-        const cp_width = @intCast(u32, if (cp_width_ < 0) 1 else cp_width_);
+        const cp_width = @intCast(u32, if (cp_width_ < 0) 0 else cp_width_);
         const cp_len = std.unicode.utf8CodepointSequenceLength(cp) catch unreachable;
         total_width += cp_width;
-        if (prefix_width + cp_width <= @divFloor(max_width-1, 2)-1) {
+        if (!prefix_done and prefix_width + cp_width <= @divFloor(max_width-1, 2)-1) {
             prefix_width += cp_width;
             prefix_end += cp_len;
-            continue;
-        }
+        } else
+            prefix_done = true;
     }
     if (total_width <= max_width) return in;
 
@@ -154,7 +155,7 @@ pub fn shorten(in: [:0]const u8, max_width: u32) [:0] const u8 {
     it = std.unicode.Utf8View.initUnchecked(in[prefix_end..]).iterator();
     while (it.nextCodepoint()) |cp| {
         const cp_width_ = c.wcwidth(cp);
-        const cp_width = @intCast(u32, if (cp_width_ < 0) 1 else cp_width_);
+        const cp_width = @intCast(u32, if (cp_width_ < 0) 0 else cp_width_);
         const cp_len = std.unicode.utf8CodepointSequenceLength(cp) catch unreachable;
         start_width += cp_width;
         start_len += cp_len;
@@ -185,6 +186,8 @@ test "shorten" {
     try t("ＡaＢＣＤＥＦＧＨ", 8, "Ａ...Ｈ"); // could optimize this, but w/e
     try t("ＡＢＣＤＥＦＧaＨ", 8, "Ａ...aＨ");
     try t("ＡＢＣＤＥＦＧＨ", 15, "ＡＢＣ...ＦＧＨ");
+    try t("❤︎a❤︎a❤︎a", 5, "❤︎...︎a"); // Variation selectors; not great, there's an additional U+FE0E before 'a'.
+    try t("ą́ą́ą́ą́ą́ą́", 5, "ą́...̨́ą́"); // Combining marks, similarly bad.
 }
 
 // ncurses_refs.c
