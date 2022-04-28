@@ -1,3 +1,9 @@
+1.17 - 2022-04-28
+	- Add 'dark-bg' color scheme and use that by default
+	- Use natural sort order when sorting by file name
+	- Improve compatibility with C89 environments
+	- Fix wrong assumption about errno not being set by realloc()
+
 1.16 - 2021-07-02
 	- Increase width of size bar depending on terminal size (Christian Göttsche)
 	- Set/increment $NCDU_LEVEL variable when spawning a shell
