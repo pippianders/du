@@ -367,6 +367,7 @@ pub fn init() void {
     _ = c.start_color();
     _ = c.use_default_colors();
     for (styles) |s, i| _ = ncdu_init_pair(@intCast(i16, i+1), s.style().fg, s.style().bg);
+    _ = c.bkgd(@intCast(c.chtype, c.COLOR_PAIR(@enumToInt(Style.default)+1)));
 
     inited = true;
 }
