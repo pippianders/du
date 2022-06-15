@@ -311,6 +311,7 @@ static void init_nc(void) {
   noecho();
   curs_set(0);
   keypad(stdscr, TRUE);
+  bkgd(COLOR_PAIR(UIC_DEFAULT+1));
   if(ncresize(min_rows, min_cols))
     min_rows = min_cols = 0;
 }
