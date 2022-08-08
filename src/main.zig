@@ -548,6 +548,11 @@ pub fn handleEvent(block: bool, force_draw: bool) void {
     }
 }
 
+test "imports" {
+    _ = @import("model.zig");
+    _ = @import("ui.zig");
+    _ = @import("util.zig");
+}
 
 test "argument parser" {
     const lst = [_][:0]const u8{ "a", "-abcd=e", "--opt1=arg1", "--opt2", "arg2", "-x", "foo", "", "--", "--arg", "", "-", };

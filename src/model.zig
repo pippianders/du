@@ -457,8 +457,8 @@ pub var root: *Dir = undefined;
 
 
 test "entry" {
-    var e = Entry.create(.file, false, "hello") catch unreachable;
-    std.debug.assert(e.etype == .file);
-    std.debug.assert(!e.isext);
-    std.testing.expectEqualStrings(e.name(), "hello");
+    var e = Entry.create(.file, false, "hello");
+    try std.testing.expectEqual(e.etype, .file);
+    try std.testing.expect(!e.isext);
+    try std.testing.expectEqualStrings(e.name(), "hello");
 }
