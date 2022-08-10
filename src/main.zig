@@ -10,6 +10,7 @@ const ui = @import("ui.zig");
 const browser = @import("browser.zig");
 const delete = @import("delete.zig");
 const util = @import("util.zig");
+const exclude = @import("exclude.zig");
 const c = @cImport(@cInclude("locale.h"));
 
 // "Custom" allocator that wraps the libc allocator and calls ui.oom() on error.
@@ -229,7 +230,7 @@ fn argConfig(args: *Args, opt: Args.Option) bool {
     else if (opt.is("--no-si")) config.si = false
     else if (opt.is("-L") or opt.is("--follow-symlinks")) config.follow_symlinks = true
     else if (opt.is("--no-follow-symlinks")) config.follow_symlinks = false
-    else if (opt.is("--exclude")) config.exclude_patterns.append(allocator.dupeZ(u8, args.arg()) catch unreachable) catch unreachable
+    else if (opt.is("--exclude")) exclude.addPattern(args.arg())
     else if (opt.is("-X") or opt.is("--exclude-from")) {
         const arg = args.arg();
         readExcludeFile(arg) catch |e| ui.die("Error reading excludes from {s}: {s}.\n", .{ arg, ui.errorString(e) });
@@ -381,11 +382,12 @@ fn readExcludeFile(path: [:0]const u8) !void {
     defer f.close();
     var rd = std.io.bufferedReader(f.reader()).reader();
     var buf = std.ArrayList(u8).init(allocator);
+    defer buf.deinit();
     while (true) {
         rd.readUntilDelimiterArrayList(&buf, '\n', 4096)
             catch |e| if (e != error.EndOfStream) return e else if (buf.items.len == 0) break;
         if (buf.items.len > 0)
-            config.exclude_patterns.append(buf.toOwnedSliceSentinel(0) catch unreachable) catch unreachable;
+            exclude.addPattern(util.arrayListBufZ(&buf));
     }
 }
 
@@ -552,6 +554,7 @@ test "imports" {
     _ = @import("model.zig");
     _ = @import("ui.zig");
     _ = @import("util.zig");
+    _ = @import("exclude.zig");
 }
 
 test "argument parser" {

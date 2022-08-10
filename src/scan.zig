@@ -6,8 +6,8 @@ const main = @import("main.zig");
 const model = @import("model.zig");
 const ui = @import("ui.zig");
 const util = @import("util.zig");
+const exclude = @import("exclude.zig");
 const c_statfs = @cImport(@cInclude("sys/vfs.h"));
-const c_fnmatch = @cImport(@cInclude("fnmatch.h"));
 
 
 // Concise stat struct for fields we're interested in, with the types used by the model.
@@ -450,7 +450,7 @@ const Context = struct {
 var active_context: *Context = undefined;
 
 // Read and index entries of the given dir.
-fn scanDir(ctx: *Context, dir: std.fs.Dir, dir_dev: u64) void {
+fn scanDir(ctx: *Context, pat: *const exclude.Patterns, dir: std.fs.Dir, dir_dev: u64) void {
     var it = main.allocator.create(std.fs.Dir.Iterator) catch unreachable;
     defer main.allocator.destroy(it);
     it.* = dir.iterate();
@@ -465,19 +465,8 @@ fn scanDir(ctx: *Context, dir: std.fs.Dir, dir_dev: u64) void {
         defer ctx.popPath();
         main.handleEvent(false, false);
 
-        // XXX: This algorithm is extremely slow, can be optimized with some clever pattern parsing.
-        const excluded = blk: {
-            for (main.config.exclude_patterns.items) |pat| {
-                var path = ctx.pathZ();
-                while (path.len > 0) {
-                    if (c_fnmatch.fnmatch(pat, path, 0) == 0) break :blk true;
-                    if (std.mem.indexOfScalar(u8, path, '/')) |idx| path = path[idx+1..:0]
-                    else break;
-                }
-            }
-            break :blk false;
-        };
-        if (excluded) {
+        const excluded = pat.match(ctx.name);
+        if (excluded == false) { // matched either a file or directory, so we can exclude this before stat()ing.
             ctx.addSpecial(.excluded);
             continue;
         }
@@ -486,7 +475,6 @@ fn scanDir(ctx: *Context, dir: std.fs.Dir, dir_dev: u64) void {
             ctx.addSpecial(.err);
             continue;
         };
-
         if (main.config.same_fs and ctx.stat.dev != dir_dev) {
             ctx.addSpecial(.other_fs);
             continue;
@@ -503,6 +491,10 @@ fn scanDir(ctx: *Context, dir: std.fs.Dir, dir_dev: u64) void {
                 }
             } else |_| {}
         }
+        if (excluded) |e| if (e and ctx.stat.dir) {
+            ctx.addSpecial(.excluded);
+            continue;
+        };
 
         var edir =
             if (ctx.stat.dir) dir.openDirZ(ctx.name, .{ .access_sub_paths = true, .iterate = true, .no_follow = true }) catch {
@@ -530,7 +522,11 @@ fn scanDir(ctx: *Context, dir: std.fs.Dir, dir_dev: u64) void {
         }
 
         ctx.addStat(dir_dev);
-        if (ctx.stat.dir) scanDir(ctx, edir.?, ctx.stat.dev);
+        if (ctx.stat.dir) {
+            var subpat = pat.enter(ctx.name);
+            defer subpat.deinit();
+            scanDir(ctx, &subpat, edir.?, ctx.stat.dev);
+        }
     }
 }
 
@@ -568,7 +564,9 @@ pub fn scan() void {
         return;
     };
     defer dir.close();
-    scanDir(active_context, dir, active_context.stat.dev);
+    var pat = exclude.getPatterns(active_context.pathZ());
+    defer pat.deinit();
+    scanDir(active_context, &pat, dir, active_context.stat.dev);
     active_context.popPath();
     active_context.final();
 }
