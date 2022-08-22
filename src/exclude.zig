@@ -120,7 +120,7 @@ test "parse" {
 // the match result is only used to construct the PatternList of the
 // subdirectory) and patterns without a sub-pointer (where the match result
 // determines whether the file/dir at this level should be included or not).
-fn PatternList(withsub: bool) type {
+fn PatternList(comptime withsub: bool) type {
     return struct {
         literals: std.HashMapUnmanaged(*const Pattern, Val, Ctx, 80) = .{},
         wild: std.ArrayListUnmanaged(*const Pattern) = .{},
@@ -150,7 +150,7 @@ fn PatternList(withsub: bool) type {
                 var e = self.literals.getOrPut(main.allocator, pat) catch unreachable;
                 if (!e.found_existing) {
                     e.key_ptr.* = pat;
-                    e.value_ptr.* = .{};
+                    e.value_ptr.* = if (withsub) .{} else {};
                 }
                 if (!withsub and !pat.isdir and e.key_ptr.*.isdir) e.key_ptr.* = pat;
                 if (withsub) {
@@ -165,14 +165,14 @@ fn PatternList(withsub: bool) type {
             if (self.literals.getKey(&.{ .pattern = name })) |p| ret = p.isdir;
             for (self.wild.items) |p| {
                 if (ret == false) return ret;
-                if (c.fnmatch(p.pattern, name, 0) == 0) ret = p.isdir;
+                if (c.fnmatch(p.pattern.ptr, name.ptr, 0) == 0) ret = p.isdir;
             }
             return ret;
         }
 
         fn enter(self: *const Self, out: *Patterns, name: [:0]const u8) void {
             if (self.literals.get(&.{ .pattern = name })) |lst| for (lst.items) |sub| out.append(sub);
-            for (self.wild.items) |p| if (c.fnmatch(p.pattern, name, 0) == 0) out.append(p.sub.?);
+            for (self.wild.items) |p| if (c.fnmatch(p.pattern.ptr, name.ptr, 0) == 0) out.append(p.sub.?);
         }
 
         fn deinit(self: *Self) void {

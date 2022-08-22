@@ -261,7 +261,8 @@ fn tryReadArgsFile(path: [:0]const u8) void {
     defer f.close();
 
     var arglist = std.ArrayList([:0]const u8).init(allocator);
-    var rd = std.io.bufferedReader(f.reader()).reader();
+    var rd_ = std.io.bufferedReader(f.reader());
+    var rd = rd_.reader();
     var linebuf: [4096]u8 = undefined;
 
     while (
@@ -379,7 +380,8 @@ fn spawnShell() void {
 fn readExcludeFile(path: [:0]const u8) !void {
     const f = try std.fs.cwd().openFileZ(path, .{});
     defer f.close();
-    var rd = std.io.bufferedReader(f.reader()).reader();
+    var rd_ = std.io.bufferedReader(f.reader());
+    var rd = rd_.reader();
     var buf = std.ArrayList(u8).init(allocator);
     defer buf.deinit();
     while (true) {

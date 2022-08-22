@@ -395,7 +395,7 @@ pub fn move(y: u32, x: u32) void {
 // (Well, addchstr() does that, but not entirely sure I want to go that way.
 // Does that even work with UTF-8? Or do I really need to go wchar madness?)
 pub fn addstr(s: [:0]const u8) void {
-    _ = c.addstr(s);
+    _ = c.addstr(s.ptr);
 }
 
 // Not to be used for strings that may end up >256 bytes.
