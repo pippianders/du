@@ -343,8 +343,7 @@ fn spawnShell() void {
         env.put("NCDU_LEVEL", "1") catch unreachable;
 
     const shell = std.os.getenvZ("NCDU_SHELL") orelse std.os.getenvZ("SHELL") orelse "/bin/sh";
-    var child = std.ChildProcess.init(&.{shell}, allocator) catch unreachable;
-    defer child.deinit();
+    var child = std.ChildProcess.init(&.{shell}, allocator);
     child.cwd = path.items;
     child.env_map = &env;
 

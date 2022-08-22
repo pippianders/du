@@ -286,8 +286,8 @@ const styles = [_]StyleDef{
 };
 
 pub const Style = lbl: {
-    var fields: [styles.len]std.builtin.TypeInfo.EnumField = undefined;
-    var decls = [_]std.builtin.TypeInfo.Declaration{};
+    var fields: [styles.len]std.builtin.Type.EnumField = undefined;
+    var decls = [_]std.builtin.Type.Declaration{};
     inline for (styles) |s, i| {
         fields[i] = .{
             .name = s.name,
