@@ -96,7 +96,7 @@ fn writeJsonString(wr: anytype, s: []const u8) !void {
             0xC  => try wr.writeAll("\\f"),
             '\\' => try wr.writeAll("\\\\"),
             '"'  => try wr.writeAll("\\\""),
-            0...7, 0xB, 0xE...0x1F, 127 => try wr.print("\\u00{x:02}", .{ch}),
+            0...7, 0xB, 0xE...0x1F, 127 => try wr.print("\\u00{x:0>2}", .{ch}),
             else => try wr.writeByte(ch)
         }
     }
