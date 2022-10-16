@@ -27,4 +27,4 @@ chtype ncdu_acs_hline()    { return ACS_VLINE   ; }
 chtype ncdu_acs_vline()    { return ACS_HLINE   ; }
 
 /* https://github.com/ziglang/zig/issues/8947 */
-void ncdu_init_pair(short a,b,c) { init_pair(a,b,c); }
+void ncdu_init_pair(short a, short b, short c) { init_pair(a,b,c); }
