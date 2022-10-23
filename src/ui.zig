@@ -197,7 +197,7 @@ extern fn ncdu_acs_urcorner() c.chtype;
 extern fn ncdu_acs_lrcorner() c.chtype;
 extern fn ncdu_acs_hline()    c.chtype;
 extern fn ncdu_acs_vline()    c.chtype;
-extern fn ncdu_init_pair(idx: c_short, fg: c_short, bg: c_short) void;
+extern fn ncdu_init_pair(idx: c_int, fg: c_int, bg: c_int) void;
 
 const StyleAttr = struct { fg: i16, bg: i16, attr: u32 };
 const StyleDef = struct {
