@@ -276,7 +276,7 @@ pub const Link = extern struct {
     name: [0]u8 = undefined,
 
     // Return value should be freed with main.allocator.
-    pub fn path(self: @This(), withRoot: bool) [:0]const u8 {
+    pub fn path(self: *const @This(), withRoot: bool) [:0]const u8 {
         var out = std.ArrayList(u8).init(main.allocator);
         self.parent.fmtPath(withRoot, &out);
         out.append('/') catch unreachable;
