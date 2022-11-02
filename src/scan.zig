@@ -156,11 +156,11 @@ const ScanDir = struct {
                 // in-place conversion to a File entry. That's more efficient,
                 // but also more code. I don't expect this to happen often.
                 var e = entry.key_ptr.*.?;
-                if (e.etype == .file) {
-                    if (e.size > 0 or e.blocks > 0) {
+                if (e.pack.etype == .file) {
+                    if (e.size > 0 or e.pack.blocks > 0) {
                         e.delStats(self.dir);
                         e.size = 0;
-                        e.blocks = 0;
+                        e.pack.blocks = 0;
                         e.addStats(self.dir, 0);
                     }
                     e.file().?.resetFlags();
@@ -177,9 +177,9 @@ const ScanDir = struct {
         var f = e.file().?;
         switch (t) {
             .err => e.setErr(self.dir),
-            .other_fs => f.other_fs = true,
-            .kernfs => f.kernfs = true,
-            .excluded => f.excluded = true,
+            .other_fs => f.pack.other_fs = true,
+            .kernfs => f.pack.kernfs = true,
+            .excluded => f.pack.excluded = true,
         }
     }
 
@@ -192,9 +192,9 @@ const ScanDir = struct {
                 // XXX: In-place conversion may also be possible here.
                 var e = entry.key_ptr.*.?;
                 // changes of dev/ino affect hard link counting in a way we can't simply merge.
-                const samedev = if (e.dir()) |d| d.dev == model.devices.getId(stat.dev) else true;
+                const samedev = if (e.dir()) |d| d.pack.dev == model.devices.getId(stat.dev) else true;
                 const sameino = if (e.link()) |l| l.ino == stat.ino else true;
-                if (e.etype == etype and samedev and sameino) {
+                if (e.pack.etype == etype and samedev and sameino) {
                     _ = self.entries.removeAdapted(@as(?*model.Entry,null), HashContext{ .cmp = name });
                     break :blk e;
                 } else e.delStatsRec(self.dir);
@@ -209,18 +209,18 @@ const ScanDir = struct {
         // entire subtree, which, in turn, would break all shared hardlink
         // sizes. The current approach may result in incorrect sizes after
         // refresh, but I expect the difference to be fairly minor.
-        if (!(e.etype == .dir and e.counted) and (e.blocks != stat.blocks or e.size != stat.size)) {
+        if (!(e.pack.etype == .dir and e.pack.counted) and (e.pack.blocks != stat.blocks or e.size != stat.size)) {
             e.delStats(self.dir);
-            e.blocks = stat.blocks;
+            e.pack.blocks = stat.blocks;
             e.size = stat.size;
         }
         if (e.dir()) |d| {
             d.parent = self.dir;
-            d.dev = model.devices.getId(stat.dev);
+            d.pack.dev = model.devices.getId(stat.dev);
         }
         if (e.file()) |f| {
             f.resetFlags();
-            f.notreg = !stat.dir and !stat.reg;
+            f.pack.notreg = !stat.dir and !stat.reg;
         }
         if (e.link()) |l| l.ino = stat.ino;
         if (e.ext()) |ext| {
@@ -415,11 +415,11 @@ const Context = struct {
             var e = if (p.items.len == 0) blk: {
                 // Root entry
                 var e = model.Entry.create(.dir, main.config.extended, self.name);
-                e.blocks = self.stat.blocks;
+                e.pack.blocks = self.stat.blocks;
                 e.size = self.stat.size;
                 if (e.ext()) |ext| ext.* = self.stat.ext;
                 model.root = e.dir().?;
-                model.root.dev = model.devices.getId(self.stat.dev);
+                model.root.pack.dev = model.devices.getId(self.stat.dev);
                 break :blk e;
             } else
                 p.items[p.items.len-1].addStat(self.name, &self.stat);
@@ -552,7 +552,7 @@ pub fn setupRefresh(parent: *model.Dir) void {
     parent.fmtPath(true, &full_path);
     active_context.pushPath(full_path.items);
     active_context.stat.dir = true;
-    active_context.stat.dev = model.devices.list.items[parent.dev];
+    active_context.stat.dev = model.devices.list.items[parent.pack.dev];
 }
 
 // To be called after setupRefresh() (or from scanRoot())
@@ -1021,7 +1021,7 @@ fn drawBox() void {
         box.move(2, 30);
         ui.addstr("size: ");
         // TODO: Should display the size of the dir-to-be-refreshed on refreshing, not the root.
-        ui.addsize(.default, util.blocksToSize(model.root.entry.blocks +| model.inodes.total_blocks));
+        ui.addsize(.default, util.blocksToSize(model.root.entry.pack.blocks +| model.inodes.total_blocks));
     }
 
     box.move(3, 2);
@@ -1088,7 +1088,7 @@ pub fn draw() void {
                     .{ ui.shorten(active_context.pathZ(), 63), active_context.items_seen }
                 ) catch return;
             } else {
-                const r = ui.FmtSize.fmt(util.blocksToSize(model.root.entry.blocks));
+                const r = ui.FmtSize.fmt(util.blocksToSize(model.root.entry.pack.blocks));
                 line = std.fmt.bufPrint(&buf, "\x1b7\x1b[J{s: <51} {d:>9} files / {s}{s}\x1b8",
                     .{ ui.shorten(active_context.pathZ(), 51), active_context.items_seen, r.num(), r.unit }
                 ) catch return;

@@ -17,7 +17,7 @@ const allocator = allocator_state.allocator();
 
 pub const EType = enum(u2) { dir, link, file };
 
-// Type for the Entry.blocks field. Smaller than a u64 to make room for flags.
+// Type for the Entry.Packed.blocks field. Smaller than a u64 to make room for flags.
 pub const Blocks = u60;
 
 // Memory layout:
@@ -31,38 +31,40 @@ pub const Blocks = u60;
 // These are all packed structs and hence do not have any alignment, which is
 // great for saving memory but perhaps not very great for code size or
 // performance.
-// (TODO: What are the aliassing rules for Zig? There is a 'noalias' keyword,
-// but does that mean all unmarked pointers are allowed to alias?)
-pub const Entry = packed struct {
-    etype: EType,
-    isext: bool,
-    // Whether or not this entry's size has been counted in its parents.
-    // Counting of Link entries is deferred until the scan/delete operation has
-    // completed, so for those entries this flag indicates an intention to be
-    // counted.
-    counted: bool,
-    blocks: Blocks, // 512-byte blocks
-    size: u64,
-    next: ?*Entry,
+pub const Entry = extern struct {
+    pack: Packed align(1),
+    size: u64 align(1),
+    next: ?*Entry align(1),
+
+    pub const Packed = packed struct(u64) {
+        etype: EType,
+        isext: bool,
+        // Whether or not this entry's size has been counted in its parents.
+        // Counting of Link entries is deferred until the scan/delete operation has
+        // completed, so for those entries this flag indicates an intention to be
+        // counted.
+        counted: bool,
+        blocks: Blocks, // 512-byte blocks
+    };
 
     const Self = @This();
 
     pub fn dir(self: *Self) ?*Dir {
-        return if (self.etype == .dir) @ptrCast(*Dir, self) else null;
+        return if (self.pack.etype == .dir) @ptrCast(*Dir, self) else null;
     }
 
     pub fn link(self: *Self) ?*Link {
-        return if (self.etype == .link) @ptrCast(*Link, self) else null;
+        return if (self.pack.etype == .link) @ptrCast(*Link, self) else null;
     }
 
     pub fn file(self: *Self) ?*File {
-        return if (self.etype == .file) @ptrCast(*File, self) else null;
+        return if (self.pack.etype == .file) @ptrCast(*File, self) else null;
     }
 
     // Whether this entry should be displayed as a "directory".
     // Some dirs are actually represented in this data model as a File for efficiency.
     pub fn isDirectory(self: *Self) bool {
-        return if (self.file()) |f| f.other_fs or f.kernfs else self.etype == .dir;
+        return if (self.file()) |f| f.pack.other_fs or f.pack.kernfs else self.pack.etype == .dir;
     }
 
     fn nameOffset(etype: EType) usize {
@@ -74,12 +76,12 @@ pub const Entry = packed struct {
     }
 
     pub fn name(self: *const Self) [:0]const u8 {
-        const ptr = @ptrCast([*:0]const u8, self) + nameOffset(self.etype);
+        const ptr = @ptrCast([*:0]const u8, self) + nameOffset(self.pack.etype); // TODO: ptrCast the 'name' field instead.
         return std.mem.sliceTo(ptr, 0);
     }
 
     pub fn ext(self: *Self) ?*Ext {
-        if (!self.isext) return null;
+        if (!self.pack.isext) return null;
         return @ptrCast(*Ext, @ptrCast([*]Ext, self) - 1);
     }
 
@@ -88,7 +90,7 @@ pub const Entry = packed struct {
         const size = nameOffset(etype) + ename.len + 1 + extsize;
         var ptr = blk: {
             while (true) {
-                if (allocator.allocWithOptions(u8, size, std.math.max(@alignOf(Ext), @alignOf(Entry)), null)) |p|
+                if (allocator.allocWithOptions(u8, size, 1, null)) |p|
                     break :blk p
                 else |_| {}
                 ui.oom();
@@ -96,8 +98,8 @@ pub const Entry = packed struct {
         };
         std.mem.set(u8, ptr, 0); // kind of ugly, but does the trick
         var e = @ptrCast(*Entry, ptr.ptr + extsize);
-        e.etype = etype;
-        e.isext = isext;
+        e.pack.etype = etype;
+        e.pack.isext = isext;
         var name_ptr = @ptrCast([*]u8, e) + nameOffset(etype);
         std.mem.copy(u8, name_ptr[0..ename.len], ename);
         return e;
@@ -105,19 +107,19 @@ pub const Entry = packed struct {
 
     // Set the 'err' flag on Dirs and Files, propagating 'suberr' to parents.
     pub fn setErr(self: *Self, parent: *Dir) void {
-        if (self.dir()) |d| d.err = true
-        else if (self.file()) |f| f.err = true
+        if (self.dir()) |d| d.pack.err = true
+        else if (self.file()) |f| f.pack.err = true
         else unreachable;
         var it: ?*Dir = if (&parent.entry == self) parent.parent else parent;
         while (it) |p| : (it = p.parent) {
-            if (p.suberr) break;
-            p.suberr = true;
+            if (p.pack.suberr) break;
+            p.pack.suberr = true;
         }
     }
 
     pub fn addStats(self: *Entry, parent: *Dir, nlink: u31) void {
-        if (self.counted) return;
-        self.counted = true;
+        if (self.pack.counted) return;
+        self.pack.counted = true;
 
         // Add link to the inode map, but don't count its size (yet).
         if (self.link()) |l| {
@@ -125,7 +127,7 @@ pub const Entry = packed struct {
             var d = inodes.map.getOrPut(l) catch unreachable;
             if (!d.found_existing) {
                 d.value_ptr.* = .{ .counted = false, .nlink = nlink };
-                inodes.total_blocks +|= self.blocks;
+                inodes.total_blocks +|= self.pack.blocks;
                 l.next = l;
             } else {
                 inodes.setStats(.{ .key_ptr = d.key_ptr, .value_ptr = d.value_ptr }, false);
@@ -144,9 +146,9 @@ pub const Entry = packed struct {
                 if (p.entry.ext()) |pe|
                     if (e.mtime > pe.mtime) { pe.mtime = e.mtime; };
             p.items +|= 1;
-            if (self.etype != .link) {
+            if (self.pack.etype != .link) {
                 p.entry.size +|= self.size;
-                p.entry.blocks +|= self.blocks;
+                p.entry.pack.blocks +|= self.pack.blocks;
             }
         }
     }
@@ -165,8 +167,8 @@ pub const Entry = packed struct {
     // anymore, meaning that delStats() followed by addStats() with the same
     // data may cause information to be lost.
     pub fn delStats(self: *Entry, parent: *Dir) void {
-        if (!self.counted) return;
-        defer self.counted = false; // defer, to make sure inodes.setStats() still sees it as counted.
+        if (!self.pack.counted) return;
+        defer self.pack.counted = false; // defer, to make sure inodes.setStats() still sees it as counted.
 
         if (self.link()) |l| {
             var d = inodes.map.getEntry(l).?;
@@ -175,7 +177,7 @@ pub const Entry = packed struct {
             if (l.next == l) {
                 _ = inodes.map.remove(l);
                 _ = inodes.uncounted.remove(l);
-                inodes.total_blocks -|= self.blocks;
+                inodes.total_blocks -|= self.pack.blocks;
             } else {
                 if (d.key_ptr.* == l)
                     d.key_ptr.* = l.next;
@@ -195,9 +197,9 @@ pub const Entry = packed struct {
         var it: ?*Dir = parent;
         while(it) |p| : (it = p.parent) {
             p.items -|= 1;
-            if (self.etype != .link) {
+            if (self.pack.etype != .link) {
                 p.entry.size -|= self.size;
-                p.entry.blocks -|= self.blocks;
+                p.entry.pack.blocks -|= self.pack.blocks;
             }
         }
     }
@@ -212,32 +214,35 @@ pub const Entry = packed struct {
     }
 };
 
-const DevId = u30; // Can be reduced to make room for more flags in Dir.
+const DevId = u30; // Can be reduced to make room for more flags in Dir.Packed.
 
-pub const Dir = packed struct {
+pub const Dir = extern struct {
     entry: Entry,
 
-    sub: ?*Entry,
-    parent: ?*Dir,
+    sub: ?*Entry align(1),
+    parent: ?*Dir align(1),
 
     // entry.{blocks,size}: Total size of all unique files + dirs. Non-shared hardlinks are counted only once.
     //   (i.e. the space you'll need if you created a filesystem with only this dir)
     // shared_*: Unique hardlinks that still have references outside of this directory.
     //   (i.e. the space you won't reclaim by deleting this dir)
     // (space reclaimed by deleting a dir =~ entry. - shared_)
-    shared_blocks: u64,
-    shared_size: u64,
-    items: u32,
+    shared_blocks: u64 align(1),
+    shared_size: u64 align(1),
+    items: u32 align(1),
 
-    // Indexes into the global 'devices.list' array
-    dev: DevId,
-
-    err: bool,
-    suberr: bool,
+    pack: Packed align(1),
 
     // Only used to find the @offsetOff, the name is written at this point as a 0-terminated string.
     // (Old C habits die hard)
-    name: u8,
+    name: [0]u8,
+
+    pub const Packed = packed struct {
+        // Indexes into the global 'devices.list' array
+        dev: DevId,
+        err: bool,
+        suberr: bool,
+    };
 
     pub fn fmtPath(self: *const @This(), withRoot: bool, out: *std.ArrayList(u8)) void {
         if (!withRoot and self.parent == null) return;
@@ -259,13 +264,13 @@ pub const Dir = packed struct {
 };
 
 // File that's been hardlinked (i.e. nlink > 1)
-pub const Link = packed struct {
+pub const Link = extern struct {
     entry: Entry,
-    parent: *Dir,
-    next: *Link, // Singly circular linked list of all *Link nodes with the same dev,ino.
+    parent: *Dir align(1),
+    next: *Link align(1), // Singly circular linked list of all *Link nodes with the same dev,ino.
     // dev is inherited from the parent Dir
-    ino: u64,
-    name: u8,
+    ino: u64 align(1),
+    name: [0]u8,
 
     // Return value should be freed with main.allocator.
     pub fn path(self: @This(), withRoot: bool) [:0]const u8 {
@@ -278,39 +283,31 @@ pub const Link = packed struct {
 };
 
 // Anything that's not an (indexed) directory or hardlink. Excluded directories are also "Files".
-pub const File = packed struct {
+pub const File = extern struct {
     entry: Entry,
+    pack: Packed,
+    name: [0]u8,
 
-    err: bool,
-    excluded: bool,
-    other_fs: bool,
-    kernfs: bool,
-    notreg: bool,
-    _pad: u3,
-
-    name: u8,
+    pub const Packed = packed struct(u8) {
+        err: bool = false,
+        excluded: bool = false,
+        other_fs: bool = false,
+        kernfs: bool = false,
+        notreg: bool = false,
+        _pad: u3 = 0, // Make this struct "ABI sized" to allow inclusion in an extern struct
+    };
 
     pub fn resetFlags(f: *@This()) void {
-        f.err = false;
-        f.excluded = false;
-        f.other_fs = false;
-        f.kernfs = false;
-        f.notreg = false;
+        f.pack = .{};
     }
 };
 
-pub const Ext = packed struct {
-    mtime: u64 = 0,
-    uid: u32 = 0,
-    gid: u32 = 0,
-    mode: u16 = 0,
+pub const Ext = extern struct {
+    mtime: u64 align(1) = 0,
+    uid: u32 align(1) = 0,
+    gid: u32 align(1) = 0,
+    mode: u16 align(1) = 0,
 };
-
-comptime {
-    std.debug.assert(@bitOffsetOf(Dir, "name") % 8 == 0);
-    std.debug.assert(@bitOffsetOf(Link, "name") % 8 == 0);
-    std.debug.assert(@bitOffsetOf(File, "name") % 8 == 0);
-}
 
 
 // List of st_dev entries. Those are typically 64bits, but that's quite a waste
@@ -367,13 +364,13 @@ pub const inodes = struct {
     const HashContext = struct {
         pub fn hash(_: @This(), l: *Link) u64 {
             var h = std.hash.Wyhash.init(0);
-            h.update(std.mem.asBytes(&@as(u32, l.parent.dev)));
+            h.update(std.mem.asBytes(&@as(u32, l.parent.pack.dev)));
             h.update(std.mem.asBytes(&l.ino));
             return h.final();
         }
 
         pub fn eql(_: @This(), a: *Link, b: *Link) bool {
-            return a.ino == b.ino and a.parent.dev == b.parent.dev;
+            return a.ino == b.ino and a.parent.pack.dev == b.parent.pack.dev;
         }
     };
 
@@ -399,7 +396,7 @@ pub const inodes = struct {
         defer dirs.deinit();
         var it = entry.key_ptr.*;
         while (true) {
-            if (it.entry.counted) {
+            if (it.entry.pack.counted) {
                 nlink += 1;
                 var parent: ?*Dir = it.parent;
                 while (parent) |p| : (parent = p.parent) {
@@ -419,19 +416,19 @@ pub const inodes = struct {
         var dir_iter = dirs.iterator();
         if (add) {
             while (dir_iter.next()) |de| {
-                de.key_ptr.*.entry.blocks +|= entry.key_ptr.*.entry.blocks;
-                de.key_ptr.*.entry.size   +|= entry.key_ptr.*.entry.size;
+                de.key_ptr.*.entry.pack.blocks +|= entry.key_ptr.*.entry.pack.blocks;
+                de.key_ptr.*.entry.size        +|= entry.key_ptr.*.entry.size;
                 if (de.value_ptr.* < nlink) {
-                    de.key_ptr.*.shared_blocks +|= entry.key_ptr.*.entry.blocks;
+                    de.key_ptr.*.shared_blocks +|= entry.key_ptr.*.entry.pack.blocks;
                     de.key_ptr.*.shared_size   +|= entry.key_ptr.*.entry.size;
                 }
             }
         } else {
             while (dir_iter.next()) |de| {
-                de.key_ptr.*.entry.blocks -|= entry.key_ptr.*.entry.blocks;
-                de.key_ptr.*.entry.size   -|= entry.key_ptr.*.entry.size;
+                de.key_ptr.*.entry.pack.blocks -|= entry.key_ptr.*.entry.pack.blocks;
+                de.key_ptr.*.entry.size        -|= entry.key_ptr.*.entry.size;
                 if (de.value_ptr.* < nlink) {
-                    de.key_ptr.*.shared_blocks -|= entry.key_ptr.*.entry.blocks;
+                    de.key_ptr.*.shared_blocks -|= entry.key_ptr.*.entry.pack.blocks;
                     de.key_ptr.*.shared_size   -|= entry.key_ptr.*.entry.size;
                 }
             }
@@ -458,7 +455,7 @@ pub var root: *Dir = undefined;
 
 test "entry" {
     var e = Entry.create(.file, false, "hello");
-    try std.testing.expectEqual(e.etype, .file);
-    try std.testing.expect(!e.isext);
+    try std.testing.expectEqual(e.pack.etype, .file);
+    try std.testing.expect(!e.pack.isext);
     try std.testing.expectEqualStrings(e.name(), "hello");
 }

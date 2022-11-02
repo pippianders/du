@@ -100,7 +100,7 @@ fn drawConfirm() void {
     ui.addstr("Are you sure you want to delete \"");
     ui.addstr(ui.shorten(ui.toUtf8(entry.name()), 21));
     ui.addch('"');
-    if (entry.etype != .dir)
+    if (entry.pack.etype != .dir)
         ui.addch('?')
     else {
         box.move(2, 18);

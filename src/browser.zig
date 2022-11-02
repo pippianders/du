@@ -83,22 +83,22 @@ fn sortLt(_: void, ap: ?*model.Entry, bp: ?*model.Entry) bool {
     switch (main.config.sort_col) {
         .name => {}, // name sorting is the fallback
         .blocks => {
-            if (sortIntLt(a.blocks, b.blocks)) |r| return r;
+            if (sortIntLt(a.pack.blocks, b.pack.blocks)) |r| return r;
             if (sortIntLt(a.size, b.size)) |r| return r;
         },
         .size => {
             if (sortIntLt(a.size, b.size)) |r| return r;
-            if (sortIntLt(a.blocks, b.blocks)) |r| return r;
+            if (sortIntLt(a.pack.blocks, b.pack.blocks)) |r| return r;
         },
         .items => {
             const ai = if (a.dir()) |d| d.items else 0;
             const bi = if (b.dir()) |d| d.items else 0;
             if (sortIntLt(ai, bi)) |r| return r;
-            if (sortIntLt(a.blocks, b.blocks)) |r| return r;
+            if (sortIntLt(a.pack.blocks, b.pack.blocks)) |r| return r;
             if (sortIntLt(a.size, b.size)) |r| return r;
         },
         .mtime => {
-            if (!a.isext or !b.isext) return a.isext;
+            if (!a.pack.isext or !b.pack.isext) return a.pack.isext;
             if (sortIntLt(a.ext().?.mtime, b.ext().?.mtime)) |r| return r;
         },
     }
@@ -135,10 +135,10 @@ pub fn loadDir(next_sel: ?*const model.Entry) void {
         dir_items.append(null) catch unreachable;
     var it = dir_parent.sub;
     while (it) |e| {
-        if (e.blocks > dir_max_blocks) dir_max_blocks = e.blocks;
+        if (e.pack.blocks > dir_max_blocks) dir_max_blocks = e.pack.blocks;
         if (e.size > dir_max_size) dir_max_size = e.size;
         const shown = main.config.show_hidden or blk: {
-            const excl = if (e.file()) |f| f.excluded else false;
+            const excl = if (e.file()) |f| f.pack.excluded else false;
             const name = e.name();
             break :blk !excl and name[0] != '.' and name[name.len-1] != '~';
         };
@@ -164,14 +164,14 @@ const Row = struct {
         const item = self.item orelse return;
         const ch: u7 = ch: {
             if (item.file()) |f| {
-                if (f.err) break :ch '!';
-                if (f.excluded) break :ch '<';
-                if (f.other_fs) break :ch '>';
-                if (f.kernfs) break :ch '^';
-                if (f.notreg) break :ch '@';
+                if (f.pack.err) break :ch '!';
+                if (f.pack.excluded) break :ch '<';
+                if (f.pack.other_fs) break :ch '>';
+                if (f.pack.kernfs) break :ch '^';
+                if (f.pack.notreg) break :ch '@';
             } else if (item.dir()) |d| {
-                if (d.err) break :ch '!';
-                if (d.suberr) break :ch '.';
+                if (d.pack.err) break :ch '!';
+                if (d.pack.suberr) break :ch '.';
                 if (d.sub == null) break :ch 'e';
             } else if (item.link()) |_| break :ch 'H';
             return;
@@ -187,7 +187,7 @@ const Row = struct {
             width += 2 + width;
         defer self.col += width;
         const item = self.item orelse return;
-        const siz = if (main.config.show_blocks) util.blocksToSize(item.blocks) else item.size;
+        const siz = if (main.config.show_blocks) util.blocksToSize(item.pack.blocks) else item.size;
         var shr = if (item.dir()) |d| (if (main.config.show_blocks) util.blocksToSize(d.shared_blocks) else d.shared_size) else 0;
         if (main.config.show_shared == .unique) shr = siz -| shr;
 
@@ -216,8 +216,8 @@ const Row = struct {
         if (main.config.show_percent) {
             self.bg.fg(.num);
             ui.addprint("{d:>5.1}", .{ 100 *
-                if (main.config.show_blocks) @intToFloat(f32, item.blocks) / @intToFloat(f32, std.math.max(1, dir_parent.entry.blocks))
-                else                         @intToFloat(f32, item.size)   / @intToFloat(f32, std.math.max(1, dir_parent.entry.size))
+                if (main.config.show_blocks) @intToFloat(f32, item.pack.blocks) / @intToFloat(f32, std.math.max(1, dir_parent.entry.pack.blocks))
+                else                         @intToFloat(f32, item.size)        / @intToFloat(f32, std.math.max(1, dir_parent.entry.size))
             });
             self.bg.fg(.default);
             ui.addch('%');
@@ -225,7 +225,7 @@ const Row = struct {
         if (main.config.show_graph and main.config.show_percent) ui.addch(' ');
         if (main.config.show_graph) {
             var max = if (main.config.show_blocks) dir_max_blocks else dir_max_size;
-            var num = if (main.config.show_blocks) item.blocks else item.size;
+            var num = if (main.config.show_blocks) item.pack.blocks else item.size;
             if (max < bar_size) {
                 max *= bar_size;
                 num *= bar_size;
@@ -290,7 +290,7 @@ const Row = struct {
     fn name(self: *Self) void {
         ui.move(self.row, self.col);
         if (self.item) |i| {
-            self.bg.fg(if (i.etype == .dir) .dir else .default);
+            self.bg.fg(if (i.pack.etype == .dir) .dir else .default);
             ui.addch(if (i.isDirectory()) '/' else ' ');
             ui.addstr(ui.shorten(ui.toUtf8(i.name()), ui.cols -| self.col -| 1));
         } else {
@@ -460,7 +460,7 @@ const info = struct {
         } else {
             ui.addstr("Type: ");
             ui.style(.default);
-            ui.addstr(if (e.isDirectory()) "Directory" else if (if (e.file()) |f| f.notreg else false) "Other" else "File");
+            ui.addstr(if (e.isDirectory()) "Directory" else if (if (e.file()) |f| f.pack.notreg else false) "Other" else "File");
         }
         row.* += 1;
 
@@ -474,7 +474,7 @@ const info = struct {
         }
 
         // Disk usage & Apparent size
-        drawSize(box, row, "   Disk usage: ", util.blocksToSize(e.blocks), if (e.dir()) |d| util.blocksToSize(d.shared_blocks) else 0);
+        drawSize(box, row, "   Disk usage: ", util.blocksToSize(e.pack.blocks), if (e.dir()) |d| util.blocksToSize(d.shared_blocks) else 0);
         drawSize(box, row, "Apparent size: ", e.size, if (e.dir()) |d| d.shared_size else 0);
 
         // Number of items
@@ -522,7 +522,7 @@ const info = struct {
         var row: u32 = 2;
 
         // Tabs
-        if (e.etype == .link) {
+        if (e.pack.etype == .link) {
             box.tab(cols-19, tab == .info, 1, "Info");
             box.tab(cols-10, tab == .links, 2, "Links");
         }
@@ -543,7 +543,7 @@ const info = struct {
     }
 
     fn keyInput(ch: i32) bool {
-        if (entry.?.etype == .link) {
+        if (entry.?.pack.etype == .link) {
             switch (ch) {
                 '1', 'h', ui.c.KEY_LEFT => { set(entry, .info); return true; },
                 '2', 'l', ui.c.KEY_RIGHT => { set(entry, .links); return true; },
@@ -778,7 +778,7 @@ pub fn draw() void {
     ui.move(ui.rows-1, 1);
     ui.style(if (main.config.show_blocks) .bold_hd else .hd);
     ui.addstr("Total disk usage: ");
-    ui.addsize(.hd, util.blocksToSize(dir_parent.entry.blocks));
+    ui.addsize(.hd, util.blocksToSize(dir_parent.entry.pack.blocks));
     ui.style(if (main.config.show_blocks) .hd else .bold_hd);
     ui.addstr("  Apparent size: ");
     ui.addsize(.hd, dir_parent.entry.size);
