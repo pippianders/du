@@ -33,8 +33,8 @@ pub const Blocks = u60;
 // performance.
 pub const Entry = extern struct {
     pack: Packed align(1),
-    size: u64 align(1),
-    next: ?*Entry align(1),
+    size: u64 align(1) = 0,
+    next: ?*Entry align(1) = null,
 
     pub const Packed = packed struct(u64) {
         etype: EType,
@@ -43,8 +43,8 @@ pub const Entry = extern struct {
         // Counting of Link entries is deferred until the scan/delete operation has
         // completed, so for those entries this flag indicates an intention to be
         // counted.
-        counted: bool,
-        blocks: Blocks, // 512-byte blocks
+        counted: bool = false,
+        blocks: Blocks = 0, // 512-byte blocks
     };
 
     const Self = @This();
@@ -67,17 +67,13 @@ pub const Entry = extern struct {
         return if (self.file()) |f| f.pack.other_fs or f.pack.kernfs else self.pack.etype == .dir;
     }
 
-    fn nameOffset(etype: EType) usize {
-        return switch (etype) {
-            .dir => @offsetOf(Dir, "name"),
-            .link => @offsetOf(Link, "name"),
-            .file => @offsetOf(File, "name"),
-        };
-    }
-
     pub fn name(self: *const Self) [:0]const u8 {
-        const ptr = @ptrCast([*:0]const u8, self) + nameOffset(self.pack.etype); // TODO: ptrCast the 'name' field instead.
-        return std.mem.sliceTo(ptr, 0);
+        const ptr = switch (self.pack.etype) {
+            .dir => &@ptrCast(*const Dir, self).name,
+            .link => &@ptrCast(*const Link, self).name,
+            .file => &@ptrCast(*const File, self).name,
+        };
+        return std.mem.sliceTo(@ptrCast([*:0]const u8, ptr), 0);
     }
 
     pub fn ext(self: *Self) ?*Ext {
@@ -85,24 +81,31 @@ pub const Entry = extern struct {
         return @ptrCast(*Ext, @ptrCast([*]Ext, self) - 1);
     }
 
-    pub fn create(etype: EType, isext: bool, ename: []const u8) *Entry {
-        const extsize = if (isext) @as(usize, @sizeOf(Ext)) else 0;
-        const size = nameOffset(etype) + ename.len + 1 + extsize;
-        var ptr = blk: {
-            while (true) {
-                if (allocator.allocWithOptions(u8, size, 1, null)) |p|
-                    break :blk p
-                else |_| {}
-                ui.oom();
-            }
+    fn alloc(comptime T: type, etype: EType, isext: bool, ename: []const u8) *Entry {
+        const size = (if (isext) @as(usize, @sizeOf(Ext)) else 0) + @sizeOf(T) + ename.len + 1;
+        var ptr = blk: while (true) {
+            if (allocator.allocWithOptions(u8, size, 1, null)) |p| break :blk p
+            else |_| {}
+            ui.oom();
         };
-        std.mem.set(u8, ptr, 0); // kind of ugly, but does the trick
-        var e = @ptrCast(*Entry, ptr.ptr + extsize);
-        e.pack.etype = etype;
-        e.pack.isext = isext;
-        var name_ptr = @ptrCast([*]u8, e) + nameOffset(etype);
-        std.mem.copy(u8, name_ptr[0..ename.len], ename);
-        return e;
+        if (isext) {
+            @ptrCast(*Ext, ptr).* = .{};
+            ptr = ptr[@sizeOf(Ext)..];
+        }
+        const e = @ptrCast(*T, ptr);
+        e.* = .{ .entry = .{ .pack = .{ .etype = etype, .isext = isext } } };
+        const n = @ptrCast([*]u8, &e.name)[0..ename.len+1];
+        std.mem.copy(u8, n, ename);
+        n[ename.len] = 0;
+        return &e.entry;
+    }
+
+    pub fn create(etype: EType, isext: bool, ename: []const u8) *Entry {
+        return switch (etype) {
+            .dir  => alloc(Dir, etype, isext, ename),
+            .file => alloc(File, etype, isext, ename),
+            .link => alloc(Link, etype, isext, ename),
+        };
     }
 
     // Set the 'err' flag on Dirs and Files, propagating 'suberr' to parents.
@@ -219,29 +222,29 @@ const DevId = u30; // Can be reduced to make room for more flags in Dir.Packed.
 pub const Dir = extern struct {
     entry: Entry,
 
-    sub: ?*Entry align(1),
-    parent: ?*Dir align(1),
+    sub: ?*Entry align(1) = null,
+    parent: ?*Dir align(1) = null,
 
     // entry.{blocks,size}: Total size of all unique files + dirs. Non-shared hardlinks are counted only once.
     //   (i.e. the space you'll need if you created a filesystem with only this dir)
     // shared_*: Unique hardlinks that still have references outside of this directory.
     //   (i.e. the space you won't reclaim by deleting this dir)
     // (space reclaimed by deleting a dir =~ entry. - shared_)
-    shared_blocks: u64 align(1),
-    shared_size: u64 align(1),
-    items: u32 align(1),
+    shared_blocks: u64 align(1) = 0,
+    shared_size: u64 align(1) = 0,
+    items: u32 align(1) = 0,
 
-    pack: Packed align(1),
+    pack: Packed align(1) = .{},
 
     // Only used to find the @offsetOff, the name is written at this point as a 0-terminated string.
     // (Old C habits die hard)
-    name: [0]u8,
+    name: [0]u8 = undefined,
 
     pub const Packed = packed struct {
         // Indexes into the global 'devices.list' array
-        dev: DevId,
-        err: bool,
-        suberr: bool,
+        dev: DevId = 0,
+        err: bool = false,
+        suberr: bool = false,
     };
 
     pub fn fmtPath(self: *const @This(), withRoot: bool, out: *std.ArrayList(u8)) void {
@@ -266,11 +269,11 @@ pub const Dir = extern struct {
 // File that's been hardlinked (i.e. nlink > 1)
 pub const Link = extern struct {
     entry: Entry,
-    parent: *Dir align(1),
-    next: *Link align(1), // Singly circular linked list of all *Link nodes with the same dev,ino.
+    parent: *Dir align(1) = undefined,
+    next: *Link align(1) = undefined, // Singly circular linked list of all *Link nodes with the same dev,ino.
     // dev is inherited from the parent Dir
-    ino: u64 align(1),
-    name: [0]u8,
+    ino: u64 align(1) = undefined,
+    name: [0]u8 = undefined,
 
     // Return value should be freed with main.allocator.
     pub fn path(self: @This(), withRoot: bool) [:0]const u8 {
@@ -285,8 +288,8 @@ pub const Link = extern struct {
 // Anything that's not an (indexed) directory or hardlink. Excluded directories are also "Files".
 pub const File = extern struct {
     entry: Entry,
-    pack: Packed,
-    name: [0]u8,
+    pack: Packed = .{},
+    name: [0]u8 = undefined,
 
     pub const Packed = packed struct(u8) {
         err: bool = false,
@@ -296,10 +299,6 @@ pub const File = extern struct {
         notreg: bool = false,
         _pad: u3 = 0, // Make this struct "ABI sized" to allow inclusion in an extern struct
     };
-
-    pub fn resetFlags(f: *@This()) void {
-        f.pack = .{};
-    }
 };
 
 pub const Ext = extern struct {

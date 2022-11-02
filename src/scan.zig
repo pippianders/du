@@ -163,7 +163,7 @@ const ScanDir = struct {
                         e.pack.blocks = 0;
                         e.addStats(self.dir, 0);
                     }
-                    e.file().?.resetFlags();
+                    e.file().?.pack = .{};
                     _ = self.entries.removeAdapted(@as(?*model.Entry,null), HashContext{ .cmp = name });
                     break :blk e;
                 } else e.delStatsRec(self.dir);
@@ -218,10 +218,7 @@ const ScanDir = struct {
             d.parent = self.dir;
             d.pack.dev = model.devices.getId(stat.dev);
         }
-        if (e.file()) |f| {
-            f.resetFlags();
-            f.pack.notreg = !stat.dir and !stat.reg;
-        }
+        if (e.file()) |f| f.pack = .{ .notreg = !stat.dir and !stat.reg };
         if (e.link()) |l| l.ino = stat.ino;
         if (e.ext()) |ext| {
             if (ext.mtime > stat.ext.mtime)
