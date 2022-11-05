@@ -89,7 +89,7 @@ int exclude_match(char *path) {
 }
 
 
-void exclude_clear() {
+void exclude_clear(void) {
   struct exclude *n, *l;
 
   for(n=excludes; n!=NULL; n=l) {

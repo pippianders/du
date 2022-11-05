@@ -146,7 +146,7 @@ char *fmtmode(unsigned short mode) {
 }
 
 
-void read_locale() {
+void read_locale(void) {
 #ifdef HAVE_LOCALE_H
   char *locale_thou_sep;
 #endif
@@ -267,7 +267,7 @@ static const struct {
   {0,0,0}
 };
 
-void uic_init() {
+void uic_init(void) {
   size_t i, j;
 
   start_color();

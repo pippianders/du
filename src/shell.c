@@ -51,7 +51,7 @@ static void set_level(void) {
   done++;
 }
 
-void shell_draw() {
+void shell_draw(void) {
   const char *full_path;
   int res;
 
@@ -95,6 +95,6 @@ void shell_draw() {
   pstate = ST_BROWSE;
 }
 
-void shell_init() {
+void shell_init(void) {
   pstate = ST_SHELL;
 }

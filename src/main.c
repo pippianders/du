@@ -317,7 +317,7 @@ static void init_nc(void) {
 }
 
 
-void close_nc() {
+void close_nc(void) {
   if(ncurses_init) {
     erase();
     refresh();

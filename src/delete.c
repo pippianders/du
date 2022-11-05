@@ -98,7 +98,7 @@ static void delete_draw_error(void) {
 }
 
 
-void delete_draw() {
+void delete_draw(void) {
   browse_draw();
   switch(state) {
     case DS_CONFIRM:  delete_draw_confirm();  break;
@@ -211,7 +211,7 @@ delete_nxt:
 }
 
 
-void delete_process() {
+void delete_process(void) {
   struct dir *par;
 
   /* confirm */

@@ -65,7 +65,7 @@ void dir_curpath_enter(const char *name) {
 
 
 /* removes last component from dir_curpath */
-void dir_curpath_leave() {
+void dir_curpath_leave(void) {
   char *tmp;
   if((tmp = strrchr(dir_curpath, '/')) == NULL)
     strcpy(dir_curpath, "/");
@@ -180,7 +180,7 @@ static void draw_error(char *cur, char *msg) {
 }
 
 
-void dir_draw() {
+void dir_draw(void) {
   float f;
   const char *unit;
 

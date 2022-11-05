@@ -70,7 +70,7 @@ static const char *flags[FLAGS*2] = {
     "F", "Excluded firmlink",
 };
 
-void help_draw() {
+void help_draw(void) {
   int i, line;
 
   browse_draw();
@@ -203,7 +203,7 @@ int help_key(int ch) {
 }
 
 
-void help_init() {
+void help_init(void) {
   page = 1;
   start = 0;
   pstate = ST_HELP;

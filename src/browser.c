@@ -256,7 +256,7 @@ static void browse_draw_item(struct dir *n, int row) {
 }
 
 
-void browse_draw() {
+void browse_draw(void) {
   struct dir *t;
   const char *tmp;
   int selected = 0, i;

@@ -38,13 +38,13 @@ int quit_key(int ch) {
   return 0;
 }
 
-void quit_draw() {
+void quit_draw(void) {
   browse_draw();
 
   nccreate(4,30, "ncdu confirm quit");
   ncaddstr(2,2, "Really quit? (y/N)");
 }
 
-void quit_init() {
+void quit_init(void) {
   pstate = ST_QUIT;
 }
