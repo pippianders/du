@@ -41,6 +41,15 @@ int si;
 static char thou_sep;
 
 
+void die(const char *fmt, ...) {
+  va_list arg;
+  va_start(arg, fmt);
+  vfprintf(stderr, fmt, arg);
+  va_end(arg);
+  exit(1);
+}
+
+
 char *cropstr(const char *from, int s) {
   static char dat[4096];
   int i, j, o = strlen(from);

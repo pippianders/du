@@ -21,7 +21,6 @@ ncdu_SOURCES=\
 
 
 noinst_HEADERS=\
-	deps/yopt.h\
 	deps/khashl.h\
 	deps/strnatcmp.h\
 	src/browser.h\
@@ -49,6 +48,5 @@ ncdu.1: $(srcdir)/doc/ncdu.pod
 # dependencies have minor ncdu-specific changes.
 update-deps:
 	wget -q https://raw.github.com/attractivechaos/klib/master/khashl.h -O "$(srcdir)/deps/khashl.h"
-	wget -q http://g.blicky.net/ylib.git/plain/yopt.h -O "$(srcdir)/deps/yopt.h"
 	wget -q https://raw.githubusercontent.com/sourcefrog/natsort/master/strnatcmp.h -O "$(srcdir)/deps/strnatcmp.h"
 	wget -q https://raw.githubusercontent.com/sourcefrog/natsort/master/strnatcmp.c -O "$(srcdir)/deps/strnatcmp.c"

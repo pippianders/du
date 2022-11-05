@@ -33,8 +33,6 @@
 #include <unistd.h>
 #include <sys/time.h>
 
-#include <yopt.h>
-
 
 int pstate;
 int read_only = 0;
@@ -113,153 +111,184 @@ int input_handle(int wait) {
 }
 
 
-/* parse command line */
+/* This is a backport of the argument parser in the Zig version.
+ * Minor differences in that this implementation can modify argv in-place and has a slightly different API. */
+struct argparser {
+  int argc;
+  char **argv;
+  char *shortopt;
+  char *last;
+  char *last_arg;
+  char shortbuf[2];
+  char argsep;
+} argparser_state;
+
+static char *argparser_pop(struct argparser *p) {
+  char *a;
+  if(p->argc == 0) return NULL;
+  a = *p->argv;
+  p->argv++;
+  p->argc--;
+  return a;
+}
+
+static int argparser_shortopt(struct argparser *p, char *buf) {
+  p->shortbuf[0] = '-';
+  p->shortbuf[1] = *buf;
+  p->shortopt = buf[1] ? buf+1 : NULL;
+  p->last = p->shortbuf;
+  return 1;
+}
+
+/* Returns 0 when done, 1 if there's an option, 2 if there's a positional argument. */
+static int argparser_next(struct argparser *p) {
+  if(p->last_arg) die("Option '%s' does not expect an argument.\n", p->last);
+  if(p->shortopt) return argparser_shortopt(p, p->shortopt);
+  p->last = argparser_pop(p);
+  if(!p->last) return 0;
+  if(p->argsep || !*p->last || *p->last != '-') return 2;
+  if(!p->last[1]) die("Invalid option '-'.\n");
+  if(p->last[1] == '-' && !p->last[2]) { /* '--' argument separator */
+    p->argsep = 1;
+    return argparser_next(p);
+  }
+  if(p->last[1] == '-') { /* long option */
+    p->last_arg = strchr(p->last, '=');
+    if(p->last_arg) {
+      *p->last_arg = 0;
+      p->last_arg++;
+    }
+    return 1;
+  }
+  /* otherwise: short option */
+  return argparser_shortopt(p, p->last+1);
+}
+
+static char *argparser_arg(struct argparser *p) {
+  char *tmp;
+  if(p->shortopt) {
+    tmp = p->shortopt;
+    p->shortopt = NULL;
+    return tmp;
+  }
+  if(p->last_arg) {
+    tmp = p->last_arg;
+    p->last_arg = NULL;
+    return tmp;
+  }
+  tmp = argparser_pop(p);
+  if(!tmp) die("Option '%s' requires an argument.\n", p->last);
+  return tmp;
+}
+
+#define OPT(_s) (strcmp(argparser_state.last, (_s)) == 0)
+#define ARG (argparser_arg(&argparser_state))
+
+static int arg_option(void) {
+  char *arg;
+  if(OPT("-q") || OPT("--slow-ui-updates")) update_delay = 2000;
+  else if(OPT("--fast-ui-updates")) update_delay = 100;
+  else if(OPT("-x") || OPT("--one-file-system")) dir_scan_smfs = 1;
+  else if(OPT("--cross-file-system")) dir_scan_smfs = 0;
+  else if(OPT("-e") || OPT("--extended")) extended_info = 1;
+  else if(OPT("--no-extended")) extended_info = 0;
+  else if(OPT("-r")) read_only++;
+  else if(OPT("-0")) dir_ui = 0;
+  else if(OPT("-1")) dir_ui = 1;
+  else if(OPT("-2")) dir_ui = 2;
+  else if(OPT("--si")) si = 1;
+  else if(OPT("--no-si")) si = 0;
+  else if(OPT("-L") || OPT("--follow-symlinks")) follow_symlinks = 1;
+  else if(OPT("--no-follow-symlinks")) follow_symlinks = 0;
+  else if(OPT("--exclude")) exclude_add(ARG);
+  else if(OPT("-X") || OPT("--exclude-form")) {
+    arg = ARG;
+    if(exclude_addfile(arg)) die("Can't open %s: %s\n", arg, strerror(errno));
+  } else if(OPT("--exclude-caches")) cachedir_tags = 1;
+  else if(OPT("--include-caches")) cachedir_tags = 0;
+  else if(OPT("--exclude-kernfs")) exclude_kernfs = 1;
+  else if(OPT("--include-kernfs")) exclude_kernfs = 0;
+  else if(OPT("--follow-firmlinks")) follow_firmlinks = 1;
+  else if(OPT("--exclude-firmlinks")) follow_firmlinks = 0;
+  else if(OPT("--confirm-quit")) confirm_quit = 1;
+  else if(OPT("--no-confirm-quit")) confirm_quit = 0;
+  else if(OPT("--color")) {
+    arg = ARG;
+    if(strcmp(arg, "off") == 0) uic_theme = 0;
+    else if(strcmp(arg, "dark") == 0) uic_theme = 1;
+    else if(strcmp(arg, "dark-bg") == 0) uic_theme = 2;
+    else die("Unknown --color option: %s\n", arg);
+  } else return 0;
+  return 1;
+}
+
+static void arg_help(void) {
+  printf("ncdu <options> <directory>\n\n");
+  printf("  -h,--help                  This help message\n");
+  printf("  -q                         Quiet mode, refresh interval 2 seconds\n");
+  printf("  -v,-V,--version            Print version\n");
+  printf("  -x                         Same filesystem\n");
+  printf("  -e                         Enable extended information\n");
+  printf("  -r                         Read only\n");
+  printf("  -o FILE                    Export scanned directory to FILE\n");
+  printf("  -f FILE                    Import scanned directory from FILE\n");
+  printf("  -0,-1,-2                   UI to use when scanning (0=none,2=full ncurses)\n");
+  printf("  --si                       Use base 10 (SI) prefixes instead of base 2\n");
+  printf("  --exclude PATTERN          Exclude files that match PATTERN\n");
+  printf("  -X, --exclude-from FILE    Exclude files that match any pattern in FILE\n");
+  printf("  -L, --follow-symlinks      Follow symbolic links (excluding directories)\n");
+  printf("  --exclude-caches           Exclude directories containing CACHEDIR.TAG\n");
+#if HAVE_LINUX_MAGIC_H && HAVE_SYS_STATFS_H && HAVE_STATFS
+  printf("  --exclude-kernfs           Exclude Linux pseudo filesystems (procfs,sysfs,cgroup,...)\n");
+#endif
+#if HAVE_SYS_ATTR_H && HAVE_GETATTRLIST && HAVE_DECL_ATTR_CMNEXT_NOFIRMLINKPATH
+  printf("  --exclude-firmlinks        Exclude firmlinks on macOS\n");
+#endif
+  printf("  --confirm-quit             Confirm quitting ncdu\n");
+  printf("  --color SCHEME             Set color scheme (off/dark/dark-bg)\n");
+  exit(0);
+}
+
+
 static void argv_parse(int argc, char **argv) {
-  yopt_t yopt;
-  int v;
-  char *val;
+  int r;
   char *export = NULL;
   char *import = NULL;
   char *dir = NULL;
 
-  static yopt_opt_t opts[] = {
-    { 'h', 0, "-h,-?,--help" },
-    { 'q', 0, "-q" },
-    { 'v', 0, "-v,-V,--version" },
-    { 'x', 0, "-x" },
-    { 'e', 0, "-e" },
-    { 'r', 0, "-r" },
-    { 'o', 1, "-o" },
-    { 'f', 1, "-f" },
-    { '0', 0, "-0" },
-    { '1', 0, "-1" },
-    { '2', 0, "-2" },
-    {  1,  1, "--exclude" },
-    { 'X', 1, "-X,--exclude-from" },
-    { 'L', 0, "-L,--follow-symlinks" },
-    { 'C', 0, "--exclude-caches" },
-    {  2,  0, "--exclude-kernfs" },
-    {  3,  0, "--follow-firmlinks" }, /* undocumented, this behavior is the current default */
-    {  4,  0, "--exclude-firmlinks" },
-    { 's', 0, "--si" },
-    { 'Q', 0, "--confirm-quit" },
-    { 'c', 1, "--color" },
-    {0,0,NULL}
-  };
-
   uic_theme = getenv("NO_COLOR") ? 0 : 2;
-
   dir_ui = -1;
   si = 0;
 
-  yopt_init(&yopt, argc, argv, opts);
-  while((v = yopt_next(&yopt, &val)) != -1) {
-    switch(v) {
-    case  0 : dir = val; break;
-    case 'h':
-      printf("ncdu <options> <directory>\n\n");
-      printf("  -h,--help                  This help message\n");
-      printf("  -q                         Quiet mode, refresh interval 2 seconds\n");
-      printf("  -v,-V,--version            Print version\n");
-      printf("  -x                         Same filesystem\n");
-      printf("  -e                         Enable extended information\n");
-      printf("  -r                         Read only\n");
-      printf("  -o FILE                    Export scanned directory to FILE\n");
-      printf("  -f FILE                    Import scanned directory from FILE\n");
-      printf("  -0,-1,-2                   UI to use when scanning (0=none,2=full ncurses)\n");
-      printf("  --si                       Use base 10 (SI) prefixes instead of base 2\n");
-      printf("  --exclude PATTERN          Exclude files that match PATTERN\n");
-      printf("  -X, --exclude-from FILE    Exclude files that match any pattern in FILE\n");
-      printf("  -L, --follow-symlinks      Follow symbolic links (excluding directories)\n");
-      printf("  --exclude-caches           Exclude directories containing CACHEDIR.TAG\n");
-#if HAVE_LINUX_MAGIC_H && HAVE_SYS_STATFS_H && HAVE_STATFS
-      printf("  --exclude-kernfs           Exclude Linux pseudo filesystems (procfs,sysfs,cgroup,...)\n");
-#endif
-#if HAVE_SYS_ATTR_H && HAVE_GETATTRLIST && HAVE_DECL_ATTR_CMNEXT_NOFIRMLINKPATH
-      printf("  --exclude-firmlinks        Exclude firmlinks on macOS\n");
-#endif
-      printf("  --confirm-quit             Confirm quitting ncdu\n");
-      printf("  --color SCHEME             Set color scheme (off/dark/dark-bg)\n");
-      exit(0);
-    case 'q': update_delay = 2000; break;
-    case 'v':
+  memset(&argparser_state, 0, sizeof(struct argparser));
+  argparser_state.argv = argv;
+  argparser_state.argc = argc;
+  argparser_next(&argparser_state); /* skip program name */
+
+  while((r = argparser_next(&argparser_state)) > 0) {
+    if(r == 2) dir = argparser_state.last;
+    else if(OPT("-v") || OPT("-V") || OPT("--version")) {
       printf("ncdu %s\n", PACKAGE_VERSION);
       exit(0);
-    case 'x': dir_scan_smfs = 1; break;
-    case 'e': extended_info = 1; break;
-    case 'r': read_only++; break;
-    case 's': si = 1; break;
-    case 'o': export = val; break;
-    case 'f': import = val; break;
-    case '0': dir_ui = 0; break;
-    case '1': dir_ui = 1; break;
-    case '2': dir_ui = 2; break;
-    case 'Q': confirm_quit = 1; break;
-    case  1 : exclude_add(val); break; /* --exclude */
-    case 'X':
-      if(exclude_addfile(val)) {
-        fprintf(stderr, "Can't open %s: %s\n", val, strerror(errno));
-        exit(1);
-      }
-      break;
-    case 'L': follow_symlinks = 1; break;
-    case 'C':
-      cachedir_tags = 1;
-      break;
-
-    case  2 : /* --exclude-kernfs */
-#if HAVE_LINUX_MAGIC_H && HAVE_SYS_STATFS_H && HAVE_STATFS
-      exclude_kernfs = 1; break;
-#else
-      fprintf(stderr, "This feature is not supported on your platform\n");
-      exit(1);
-#endif
-    case  3 : /* --follow-firmlinks */
-#if HAVE_SYS_ATTR_H && HAVE_GETATTRLIST && HAVE_DECL_ATTR_CMNEXT_NOFIRMLINKPATH
-      follow_firmlinks = 1; break;
-#else
-      fprintf(stderr, "This feature is not supported on your platform\n");
-      exit(1);
-#endif
-    case  4 : /* --exclude-firmlinks */
-#if HAVE_SYS_ATTR_H && HAVE_GETATTRLIST && HAVE_DECL_ATTR_CMNEXT_NOFIRMLINKPATH
-      follow_firmlinks = 0; break;
-#else
-      fprintf(stderr, "This feature is not supported on your platform\n");
-      exit(1);
-#endif
-    case 'c':
-      if(strcmp(val, "off") == 0)  { uic_theme = 0; }
-      else if(strcmp(val, "dark") == 0) { uic_theme = 1; }
-      else if(strcmp(val, "dark-bg") == 0) { uic_theme = 2; }
-      else {
-        fprintf(stderr, "Unknown --color option: %s\n", val);
-        exit(1);
-      }
-      break;
-    case -2:
-      fprintf(stderr, "ncdu: %s.\n", val);
-      exit(1);
-    }
+    } else if(OPT("-h") || OPT("-?") || OPT("--help")) arg_help();
+    else if(OPT("-o")) export = ARG;
+    else if(OPT("-f")) import = ARG;
+    else if(!arg_option()) die("Unknown option '%s'.\n", argparser_state.last);
   }
 
+#if !(HAVE_LINUX_MAGIC_H && HAVE_SYS_STATFS_H && HAVE_STATFS)
+  if(exclude_kernfs) die("The --exclude-kernfs flag is currently only supported on Linux.\n");
+#endif
+
   if(export) {
-    if(dir_export_init(export)) {
-      fprintf(stderr, "Can't open %s: %s\n", export, strerror(errno));
-      exit(1);
-    }
-    if(strcmp(export, "-") == 0)
-      ncurses_tty = 1;
+    if(dir_export_init(export)) die("Can't open %s: %s\n", export, strerror(errno));
+    if(strcmp(export, "-") == 0) ncurses_tty = 1;
   } else
     dir_mem_init(NULL);
 
   if(import) {
-    if(dir_import_init(import)) {
-      fprintf(stderr, "Can't open %s: %s\n", import, strerror(errno));
-      exit(1);
-    }
-    if(strcmp(import, "-") == 0)
-      ncurses_tty = 1;
+    if(dir_import_init(import)) die("Can't open %s: %s\n", import, strerror(errno));
+    if(strcmp(import, "-") == 0) ncurses_tty = 1;
   } else
     dir_scan_init(dir ? dir : ".");
 
@@ -282,10 +311,7 @@ static void init_nc(void) {
 
   if(ncurses_tty) {
     tty = fopen("/dev/tty", "r+");
-    if(!tty) {
-      fprintf(stderr, "Error opening /dev/tty: %s\n", strerror(errno));
-      exit(1);
-    }
+    if(!tty) die("Error opening /dev/tty: %s\n", strerror(errno));
     term = newterm(NULL, tty, tty);
     if(term)
       set_term(term);
@@ -294,17 +320,11 @@ static void init_nc(void) {
     /* Make sure the user doesn't accidentally pipe in data to ncdu's standard
      * input without using "-f -". An annoying input sequence could result in
      * the deletion of your files, which we want to prevent at all costs. */
-    if(!isatty(0)) {
-      fprintf(stderr, "Standard input is not a TTY. Did you mean to import a file using '-f -'?\n");
-      exit(1);
-    }
+    if(!isatty(0)) die("Standard input is not a TTY. Did you mean to import a file using '-f -'?\n");
     ok = !!initscr();
   }
 
-  if(!ok) {
-    fprintf(stderr, "Error while initializing ncurses.\n");
-    exit(1);
-  }
+  if(!ok) die("Error while initializing ncurses.\n");
 
   uic_init();
   cbreak();
@@ -326,7 +346,6 @@ void close_nc(void) {
 }
 
 
-/* main program */
 int main(int argc, char **argv) {
   read_locale();
   argv_parse(argc, argv);

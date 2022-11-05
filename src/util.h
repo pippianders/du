@@ -30,6 +30,9 @@
 #include <ncurses.h>
 
 
+void die(const char *, ...);
+
+
 /* UI colors: (foreground, background, attrs)
  *  NAME         OFF         DARK                DARK-BG   */
 #define UI_COLORS \

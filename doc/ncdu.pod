@@ -54,12 +54,12 @@ directory with many files. 10.000 files will get you an export in the order of
 gzip. This scales linearly, so be prepared to handle a few tens of megabytes
 when dealing with millions of files.
 
-=item B<-e>
+=item B<-e>, B<--extended>, B<--no-extended>
 
-Enable extended information mode. This will, in addition to the usual file
-information, also read the ownership, permissions and last modification time
-for each file. This will result in higher memory usage (by roughly ~30%) and in
-a larger output file when exporting.
+Enable/disable extended information mode. This will, in addition to the usual
+file information, also read the ownership, permissions and last modification
+time for each file. This will result in higher memory usage (by roughly ~30%)
+and in a larger output file when exporting.
 
 When using the file export/import function, this flag will need to be added
 both when exporting (to make sure the information is added to the export), and
@@ -99,12 +99,13 @@ Provide a full-screen ncurses interface while scanning a directory or importing
 a file. This is the only interface that provides feedback on any non-fatal
 errors while scanning.
 
-=item B<-q>
+=item B<-q>, B<--slow-ui-updates>, B<--fast-ui-updates>
 
-Quiet mode. While scanning or importing the directory, ncdu will update the
-screen 10 times a second by default, this will be decreased to once every 2
-seconds in quiet mode. Use this feature to save bandwidth over remote
-connections. This option has no effect when C<-0> is used.
+Change the UI update interval while scanning or importing. Ncdu will update the
+screen 10 times a second by default (C<--fast-ui-updates>), this can be
+decreased to once every 2 seconds with C<-q> or C<--slow-ui-updates>. This
+feature can be used to save bandwidth over remote connections. This option has
+no effect when C<-0> is used.
 
 =item B<-r>
 
@@ -123,16 +124,16 @@ C<-rr>).
 In addition to C<-r>, this will also disable the shell spawning feature of the
 file browser.
 
-=item B<--si>
+=item B<--si>, B<--no-si>
 
 List sizes using base 10 prefixes, that is, powers of 1000 (KB, MB, etc), as
 defined in the International System of Units (SI), instead of the usual base 2
 prefixes, that is, powers of 1024 (KiB, MiB, etc).
 
-=item B<--confirm-quit>
+=item B<--confirm-quit>, B<--no-confirm-quit>
 
-Requires a confirmation before quitting ncdu. Very helpful when you
-accidentally press 'q' during or after a very long scan.
+Require a confirmation before quitting ncdu. Very helpful when you accidentally
+press 'q' during or after a very long scan.
 
 =item B<--color> I<SCHEME>
 
@@ -152,10 +153,15 @@ directory information from a file.
 
 =over
 
-=item B<-x>
+=item B<-x>, B<--one-file-system>
 
 Do not cross filesystem boundaries, i.e. only count files and directories on
 the same filesystem as the directory being scanned.
+
+=item B<--cross-file-system>
+
+Do cross filesystem boundaries. This is the default, but can be specified to
+overrule a previously given C<-x>.
 
 =item B<--exclude> I<PATTERN>
 
@@ -168,27 +174,28 @@ can be added multiple times to add more patterns.
 Exclude files that match any pattern in I<FILE>. Patterns should be separated
 by a newline.
 
-=item B<--exclude-caches>
+=item B<--include-caches>, B<--exclude-caches>
 
-Exclude directories containing CACHEDIR.TAG.  The directories will still be
-displayed, but not their content, and they are not counted towards the disk
-usage statistics.
-See http://www.brynosaurus.com/cachedir/
+Include (default) or exclude directories containing CACHEDIR.TAG.  The
+directories will still be displayed, but their contents will not be scanned or
+counted towards the disk usage statistics.
+L<http://www.brynosaurus.com/cachedir/>
 
-=item B<-L>, B<--follow-symlinks>
+=item B<-L>, B<--follow-symlinks>, B<--no-follow-symlinks>
 
-Follow symlinks and count the size of the file they point to. As of ncdu 1.14,
-this option will not follow symlinks to directories and will count each
-symlinked file as a unique file (i.e. unlike how hard links are handled). This
-is subject to change in later versions.
+Follow (or not) symlinks and count the size of the file they point to. As of
+ncdu 1.14, this option will not follow symlinks to directories and will count
+each symlinked file as a unique file (i.e. unlike how hard links are handled).
+This is subject to change in later versions.
 
-=item B<--exclude-firmlinks>
+=item B<--exclude-firmlinks>, B<--follow-firmlinks>
 
-(MacOS only) Exclude firmlinks.
+(MacOS only) Exclude or follow firmlinks.
 
-=item B<--exclude-kernfs>
+=item B<--include-kernfs>, B<--exclude-kernfs>
 
-(Linux only) Exclude Linux pseudo filesystems, e.g. /proc (procfs), /sys (sysfs).
+(Linux only) Include (default) or exclude Linux pseudo filesystems, e.g. /proc
+(procfs), /sys (sysfs).
 
 The complete list of currently known pseudo filesystems is: binfmt, bpf, cgroup,
 cgroup2, debug, devpts, proc, pstore, security, selinux, sys, trace.
