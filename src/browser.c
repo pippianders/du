@@ -31,7 +31,7 @@
 #include <time.h>
 
 
-static int graph = 1, show_as = 0, info_show = 0, info_page = 0, info_start = 0, show_items = 0, show_mtime = 0;
+static int info_show = 0, info_page = 0, info_start = 0;
 static const char *message = NULL;
 
 

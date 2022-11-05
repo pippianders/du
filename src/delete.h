@@ -28,6 +28,8 @@
 
 #include "global.h"
 
+extern int delete_confirm;
+
 void delete_process(void);
 int  delete_key(int);
 void delete_draw(void);

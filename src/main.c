@@ -42,6 +42,11 @@ int extended_info = 0;
 int follow_symlinks = 0;
 int follow_firmlinks = 1;
 int confirm_quit = 0;
+int si = 0;
+int show_as = 0;
+int graph = 1;
+int show_items = 0;
+int show_mtime = 0;
 
 static int min_rows = 17, min_cols = 60;
 static int ncurses_init = 0;
@@ -185,7 +190,7 @@ static char *argparser_arg(struct argparser *p) {
 #define ARG (argparser_arg(&argparser_state))
 
 static int arg_option(void) {
-  char *arg;
+  char *arg, *tmp;
   if(OPT("-q") || OPT("--slow-ui-updates")) update_delay = 2000;
   else if(OPT("--fast-ui-updates")) update_delay = 100;
   else if(OPT("-x") || OPT("--one-file-system")) dir_scan_smfs = 1;
@@ -193,6 +198,43 @@ static int arg_option(void) {
   else if(OPT("-e") || OPT("--extended")) extended_info = 1;
   else if(OPT("--no-extended")) extended_info = 0;
   else if(OPT("-r")) read_only++;
+  else if(OPT("--show-hidden")) dirlist_hidden = 0;
+  else if(OPT("--hide-hidden")) dirlist_hidden = 1;
+  else if(OPT("--show-itemcount")) show_items = 1;
+  else if(OPT("--hide-itemcount")) show_items = 0;
+  else if(OPT("--show-mtime")) show_mtime = 1;
+  else if(OPT("--hide-mtime")) show_mtime = 0;
+  else if(OPT("--show-graph")) graph |= 1;
+  else if(OPT("--hide-graph")) graph &= 2;
+  else if(OPT("--show-percent")) graph |= 2;
+  else if(OPT("--hide-percent")) graph &= 1;
+  else if(OPT("--group-directories-first")) dirlist_sort_df = 1;
+  else if(OPT("--no-group-directories-first")) dirlist_sort_df = 0;
+  else if(OPT("--sort")) {
+    arg = ARG;
+    tmp = strrchr(arg, '-');
+    if(tmp && (strcmp(tmp, "-asc") == 0 || strcmp(tmp, "-desc") == 0)) *tmp = 0;
+
+    if(strcmp(arg, "name") == 0) {
+      dirlist_sort_col = DL_COL_NAME;
+      dirlist_sort_desc = 0;
+    } else if(strcmp(arg, "disk-usage") == 0) {
+      dirlist_sort_col = DL_COL_SIZE;
+      dirlist_sort_desc = 1;
+    } else if(strcmp(arg, "apparent-size") == 0) {
+      dirlist_sort_col = DL_COL_ASIZE;
+      dirlist_sort_desc = 1;
+    } else if(strcmp(arg, "itemcount") == 0) {
+      dirlist_sort_col = DL_COL_ITEMS;
+      dirlist_sort_desc = 1;
+    } else if(strcmp(arg, "mtime") == 0) {
+      dirlist_sort_col = DL_COL_MTIME;
+      dirlist_sort_desc = 0;
+    } else die("Invalid argument to --sort: '%s'.\n", arg);
+
+    if(tmp && !*tmp) dirlist_sort_desc = tmp[1] == 'd';
+  } else if(OPT("--apparent-size")) show_as = 1;
+  else if(OPT("--disk-usage")) show_as = 0;
   else if(OPT("-0")) dir_ui = 0;
   else if(OPT("-1")) dir_ui = 1;
   else if(OPT("-2")) dir_ui = 2;
@@ -212,6 +254,8 @@ static int arg_option(void) {
   else if(OPT("--exclude-firmlinks")) follow_firmlinks = 0;
   else if(OPT("--confirm-quit")) confirm_quit = 1;
   else if(OPT("--no-confirm-quit")) confirm_quit = 0;
+  else if(OPT("--confirm-delete")) delete_confirm = 1;
+  else if(OPT("--no-confirm-delete")) delete_confirm = 0;
   else if(OPT("--color")) {
     arg = ARG;
     if(strcmp(arg, "off") == 0) uic_theme = 0;

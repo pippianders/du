@@ -109,6 +109,16 @@ extern int extended_info;
 extern int follow_symlinks;
 /* flag whether we want to follow firmlinks */
 extern int follow_firmlinks;
+/* display SI units */
+extern int si;
+/* show apparent sizes */
+extern int show_as;
+/* graph display setting */
+extern int graph;
+/* column visibility */
+extern int show_items;
+extern int show_mtime;
+
 
 /* handle input from keyboard and update display */
 int input_handle(int);

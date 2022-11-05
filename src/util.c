@@ -37,7 +37,6 @@
 int uic_theme;
 int winrows, wincols;
 int subwinr, subwinc;
-int si;
 static char thou_sep;
 
 

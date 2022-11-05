@@ -35,9 +35,10 @@
 #define DS_PROGRESS 1
 #define DS_FAILED   2
 
+int delete_confirm = 1;
 
 static struct dir *root, *nextsel, *curdir;
-static char noconfirm = 0, ignoreerr = 0, state;
+static char ignoreerr = 0, state;
 static signed char seloption;
 static int lasterrno;
 
@@ -126,7 +127,7 @@ int delete_key(int ch) {
         if(seloption == 1)
           return 1;
         if(seloption == 2)
-          noconfirm++;
+          delete_confirm = 0;
         state = DS_PROGRESS;
         break;
       case 'q':
@@ -216,7 +217,7 @@ void delete_process(void) {
 
   /* confirm */
   seloption = 1;
-  while(state == DS_CONFIRM && !noconfirm)
+  while(state == DS_CONFIRM && delete_confirm)
     if(input_handle(0)) {
       browse_init(root->parent);
       return;
