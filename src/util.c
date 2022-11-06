@@ -449,3 +449,9 @@ void addparentstats(struct dir *d, int64_t size, int64_t asize, uint64_t mtime, 
 void *xmalloc(size_t size) { wrap_oom(malloc(size)) }
 void *xcalloc(size_t n, size_t size) { wrap_oom(calloc(n, size)) }
 void *xrealloc(void *mem, size_t size) { wrap_oom(realloc(mem, size)) }
+
+char *xstrdup(const char *str) {
+  char *r = xmalloc(strlen(str)+1);
+  strcpy(r, str);
+  return r;
+}

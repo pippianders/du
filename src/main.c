@@ -294,15 +294,80 @@ static void arg_help(void) {
 }
 
 
+static void config_read(const char *fn) {
+  FILE *f;
+  char buf[1024], *line, *tmp, **args = NULL, **argsi;
+  int r, len, argslen = 0, argssize = 0;
+
+  if((f = fopen(fn, "r")) == NULL) {
+    if(errno == ENOENT || errno == ENOTDIR) return;
+    die("Error opening %s: %s.\nRun with --ignore-config to skip reading config files.\n", fn, strerror(errno));
+  }
+
+  while(fgets(buf, 1024, f) != NULL) {
+    line = buf;
+    while(*line == ' ' || *line == '\t') line++;
+    len = strlen(line);
+    while(len > 0 && (line[len-1] == ' ' || line[len-1] == '\t' || line[len-1] == '\r' || line[len-1] == '\n')) len -= 1;
+    line[len] = 0;
+    if(len == 0 || *line == '#') continue;
+
+    /* Reserve at least 3 spots, one for the option, one for a possible argument and one for the final NULL. */
+    if(argslen+3 >= argssize) {
+      argssize = argssize ? argssize*2 : 32;
+      args = xrealloc(args, sizeof(char *)*argssize);
+    }
+    for(tmp=line; *tmp && *tmp != ' ' && *tmp != '\t' && *tmp != '='; tmp++);
+    while(*tmp && (*tmp == ' ' || *tmp == '\t')) {
+      *tmp = 0;
+      tmp++;
+    }
+    args[argslen++] = xstrdup(line);
+    if(*tmp) args[argslen++] = xstrdup(tmp);
+  }
+  if(ferror(f))
+    die("Error reading from %s: %s\nRun with --ignore-config to skip reading config files.\n", fn, strerror(errno));
+  fclose(f);
+  if(!argslen) return;
+
+  args[argslen] = NULL;
+  memset(&argparser_state, 0, sizeof(struct argparser));
+  argparser_state.argv = args;
+  argparser_state.argc = argslen;
+
+  while((r = argparser_next(&argparser_state)) > 0)
+    if(r == 2 || !arg_option())
+      die("Unknown option in config file '%s': %s.\nRun with --ignore-config to skip reading config files.\n", fn, argparser_state.last);
+
+  for(argsi=args; argsi && *argsi; argsi++) free(*argsi);
+  free(args);
+}
+
+
+static void config_load(int argc, char **argv) {
+  char *env, buf[1024];
+  int r;
+
+  for(r=0; r<argc; r++)
+    if(strcmp(argv[r], "--ignore-config") == 0) return;
+
+  config_read("/etc/ncdu.conf");
+
+  if((env = getenv("XDG_CONFIG_HOME")) != NULL) {
+    r = snprintf(buf, 1024, "%s/ncdu/config", env);
+    if(r > 0 && r < 1024) config_read(buf);
+  } else if((env = getenv("HOME")) != NULL) {
+    r = snprintf(buf, 1024, "%s/.config/ncdu/config", env);
+    if(r > 0 && r < 1024) config_read(buf);
+  }
+}
+
+
 static void argv_parse(int argc, char **argv) {
   int r;
   char *export = NULL;
   char *import = NULL;
   char *dir = NULL;
-
-  uic_theme = getenv("NO_COLOR") ? 0 : 2;
-  dir_ui = -1;
-  si = 0;
 
   memset(&argparser_state, 0, sizeof(struct argparser));
   argparser_state.argv = argv;
@@ -317,6 +382,7 @@ static void argv_parse(int argc, char **argv) {
     } else if(OPT("-h") || OPT("-?") || OPT("--help")) arg_help();
     else if(OPT("-o")) export = ARG;
     else if(OPT("-f")) import = ARG;
+    else if(OPT("--ignore-config")) {}
     else if(!arg_option()) die("Unknown option '%s'.\n", argparser_state.last);
   }
 
@@ -392,6 +458,8 @@ void close_nc(void) {
 
 int main(int argc, char **argv) {
   read_locale();
+  uic_theme = getenv("NO_COLOR") ? 0 : 2;
+  config_load(argc, argv);
   argv_parse(argc, argv);
 
   if(dir_ui == 2)

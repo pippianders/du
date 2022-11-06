@@ -46,8 +46,7 @@ void exclude_add(char *pat) {
     n = &((*n)->next);
 
   *n = (struct exclude *) xcalloc(1, sizeof(struct exclude));
-  (*n)->pattern = (char *) xmalloc(strlen(pat)+1);
-  strcpy((*n)->pattern, pat);
+  (*n)->pattern = xstrdup(pat);
 }
 
 

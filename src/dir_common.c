@@ -35,7 +35,7 @@ int (*dir_process)(void);
 char *dir_curpath;   /* Full path of the last seen item. */
 struct dir_output dir_output;
 char *dir_fatalerr; /* Error message on a fatal error. (NULL if there was no fatal error) */
-int dir_ui;         /* User interface to use */
+int dir_ui = -1;    /* User interface to use */
 static int confirm_quit_while_scanning_stage_1_passed; /* Additional check before quitting */
 static char *lasterr; /* Path where the last error occurred. */
 static int curpathl; /* Allocated length of dir_curpath */
