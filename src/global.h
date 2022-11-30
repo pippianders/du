@@ -95,8 +95,10 @@ struct dir_ext {
 
 /* program state */
 extern int pstate;
-/* read-only flag, 1+ = disable deletion, 2+ = also disable shell */
-extern int read_only;
+/* enabled features */
+extern int can_delete;
+extern int can_shell;
+extern int can_refresh;
 /* minimum screen update interval when calculating, in ms */
 extern long update_delay;
 /* filter directories with CACHEDIR.TAG */

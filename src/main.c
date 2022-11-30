@@ -35,7 +35,9 @@
 
 
 int pstate;
-int read_only = 0;
+int can_delete = -1;
+int can_shell = -1;
+int can_refresh = -1;
 long update_delay = 100;
 int cachedir_tags = 0;
 int extended_info = 0;
@@ -197,7 +199,14 @@ static int arg_option(void) {
   else if(OPT("--cross-file-system")) dir_scan_smfs = 0;
   else if(OPT("-e") || OPT("--extended")) extended_info = 1;
   else if(OPT("--no-extended")) extended_info = 0;
-  else if(OPT("-r")) read_only++;
+  else if(OPT("-r") && !can_delete) can_shell = 0;
+  else if(OPT("-r")) can_delete = 0;
+  else if(OPT("--enable-shell")) can_shell = 1;
+  else if(OPT("--disable-shell")) can_shell = 0;
+  else if(OPT("--enable-delete")) can_delete = 1;
+  else if(OPT("--disable-delete")) can_delete = 0;
+  else if(OPT("--enable-refresh")) can_refresh = 1;
+  else if(OPT("--disable-refresh")) can_refresh = 0;
   else if(OPT("--show-hidden")) dirlist_hidden = 0;
   else if(OPT("--hide-hidden")) dirlist_hidden = 1;
   else if(OPT("--show-itemcount")) show_items = 1;
@@ -406,6 +415,10 @@ static void argv_parse(int argc, char **argv) {
    * feedback when exporting to stdout. */
   if(dir_ui == -1)
     dir_ui = export && strcmp(export, "-") == 0 ? 0 : export ? 1 : 2;
+
+  if(can_delete == -1)  can_delete  = import ? 0 : 1;
+  if(can_shell == -1)   can_shell   = import ? 0 : 1;
+  if(can_refresh == -1) can_refresh = import ? 0 : 1;
 }
 
 

@@ -272,7 +272,7 @@ void browse_draw(void) {
   addstrc(UIC_HD, " for help");
   if(dir_import_active)
     mvaddstr(0, wincols-10, "[imported]");
-  else if(read_only)
+  else if(!can_delete)
     mvaddstr(0, wincols-11, "[read-only]");
 
   /* second line - the path */
@@ -323,7 +323,7 @@ void browse_draw(void) {
   if(message) {
     nccreate(6, 60, "Message");
     ncaddstr(2, 2, message);
-    ncaddstr(4, 34, "Press any key to continue");
+    ncaddstr(4, 33, "Press any key to continue");
   }
 
   /* draw information window */
@@ -488,8 +488,8 @@ int browse_key(int ch) {
 
     /* and other stuff */
     case 'r':
-      if(dir_import_active) {
-        message = "Directory imported from file, won't refresh.";
+      if(!can_refresh) {
+        message = "Directory refresh feature disabled.";
         break;
       }
       if(dirlist_par) {
@@ -527,14 +527,12 @@ int browse_key(int ch) {
       info_show = 0;
       break;
     case 'd':
-      if(read_only >= 1 || dir_import_active) {
-        message = read_only >= 1
-          ? "File deletion disabled in read-only mode."
-          : "File deletion not available for imported directories.";
-        break;
-      }
       if(sel == NULL || sel == dirlist_parent)
         break;
+      if(!can_delete) {
+        message = "Deletion feature disabled.";
+        break;
+      }
       info_show = 0;
       if((t = dirlist_get(1)) == sel)
         if((t = dirlist_get(-1)) == sel || t == dirlist_parent)
@@ -542,10 +540,8 @@ int browse_key(int ch) {
       delete_init(sel, t);
       break;
      case 'b':
-      if(read_only >= 2 || dir_import_active) {
-        message = read_only >= 2
-          ? "Shell feature disabled in read-only mode."
-          : "Shell feature not available for imported directories.";
+      if(!can_shell) {
+        message = "Shell feature disabled.";
         break;
       }
       shell_init();

@@ -167,22 +167,29 @@ decreased to once every 2 seconds with C<-q> or C<--slow-ui-updates>. This
 feature can be used to save bandwidth over remote connections. This option has
 no effect when C<-0> is used.
 
+=item B<--enable-shell>, B<--disable-shell>
+
+Enable or disable shell spawning from the browser. This feature is enabled by
+default when scanning a live directory and disabled when importing from file.
+
+=item B<--enable-delete>, B<--disable-delete>
+
+Enable or disable the built-in file deletion feature. This feature is enabled
+by default when scanning a live directory and disabled when importing from
+file. Explicitly disabling the deletion feature can work as a safeguard to
+prevent accidental data loss.
+
+=item B<--enable-refresh>, B<--disable-refresh>
+
+Enable or disable directory refreshing from the browser. This feature is
+enabled by default when scanning a live directory and disabled when importing
+from file.
+
 =item B<-r>
 
-Read-only mode. This will disable the built-in file deletion feature. This
-option has no effect when C<-o> is used, because there will not be a browser
-interface in that case. It has no effect when C<-f> is used, either, because
-the deletion feature is disabled in that case anyway.
-
-WARNING: This option will only prevent deletion through the file browser. It is
-still possible to spawn a shell from ncdu and delete or modify files from
-there. To disable that feature as well, pass the C<-r> option twice (see
-C<-rr>).
-
-=item B<-rr>
-
-In addition to C<-r>, this will also disable the shell spawning feature of the
-file browser.
+Read-only mode. When given once, this is an alias for C<--disable-delete>, when
+given twice it will also add C<--disable-shell>, thus ensuring that there is no
+way to modify the file system from within ncdu.
 
 =item B<--si>, B<--no-si>
 
@@ -271,6 +278,9 @@ starting with C<#> are ignored. Example configuration file:
 
   # Always enable extended mode
   -e
+
+  # Disable file deletion
+  --disable-delete
 
   # Exclude .git directories
   --exclude .git
