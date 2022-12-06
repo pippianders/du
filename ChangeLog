@@ -1,3 +1,18 @@
+1.18 - 2022-12-06
+	- Fix 'dark-bg' color scheme to actually have a dark background
+	- Backport configuration file support from 2.x
+	- Backport many new CLI options from 2.x
+	- Negation of existing flags: --no-si, --no-confirm-quit, --no-follow-symlinks, --include-caches, --include-kernfs
+	- --[no-]extended in addition to -e
+	- --one-file-system and --cross-file-system in addition to -x
+	- --slow-ui-updates, --fast-ui-updates in addition to -q
+	- Column visibility options: --(show|hide)-(hidden|itemcount|mtime|graph|percent)
+	- Sorting: --sort, --[no-]group-directories-first
+	- Feature selection: --(enable|disable)-(shell|delete|refresh)
+	- Deletion confirmation: --[no-]confirm-delete
+	- Hidden file visibility: --show-hidden, --hide-hidden
+	- Size display: --apparent-size, --disk-usage
+
 1.17 - 2022-04-28
 	- Add 'dark-bg' color scheme and use that by default
 	- Use natural sort order when sorting by file name
