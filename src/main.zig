@@ -454,7 +454,7 @@ pub fn main() void {
     }
 
     if (@import("builtin").os.tag != .linux and config.exclude_kernfs)
-        ui.die("The --exclude-kernfs tag is currently only supported on Linux.\n", .{});
+        ui.die("The --exclude-kernfs flag is currently only supported on Linux.\n", .{});
 
     const out_tty = std.io.getStdOut().isTty();
     const in_tty = std.io.getStdIn().isTty();
