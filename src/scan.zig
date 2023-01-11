@@ -615,7 +615,10 @@ const Import = struct {
                 return;
             }
         }
-        self.ch = self.rdbuf[self.rdoff];
+        // Zig 0.10 copies the entire array to the stack in ReleaseSafe mode,
+        // work around that bug by indexing into a pointer to the array
+        // instead.
+        self.ch = (&self.rdbuf)[self.rdoff];
         self.rdoff += 1;
         self.byte += 1;
     }
