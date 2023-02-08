@@ -51,6 +51,7 @@
 
 
 int dir_scan_smfs; /* Stay on the same filesystem */
+int exclude_kernfs; /* Exclude Linux pseudo filesystems */
 
 static uint64_t curdev;   /* current device we're scanning on */
 
@@ -61,7 +62,6 @@ static unsigned int buf_nlink;
 
 
 #if HAVE_LINUX_MAGIC_H && HAVE_SYS_STATFS_H && HAVE_STATFS
-int exclude_kernfs; /* Exclude Linux pseudo filesystems */
 
 static int is_kernfs(unsigned long type) {
   if(
