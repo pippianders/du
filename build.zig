@@ -10,6 +10,11 @@ pub fn build(b: *std.build.Builder) void {
     const exe = b.addExecutable("ncdu", "src/main.zig");
     exe.setTarget(target);
     exe.setBuildMode(mode);
+    // https://github.com/ziglang/zig/blob/b52be973dfb7d1408218b8e75800a2da3dc69108/build.zig#L551-L554
+    if (exe.target.isDarwin()) {
+        // useful for package maintainers
+        exe.headerpad_max_install_names = true;
+    }
     exe.addCSourceFile("src/ncurses_refs.c", &[_][]const u8{});
     exe.linkLibC();
     exe.linkSystemLibrary("ncursesw");
