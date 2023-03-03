@@ -775,14 +775,17 @@ pub fn draw() void {
     ui.style(.hd);
     ui.move(ui.rows-1, 0);
     ui.hline(' ', ui.cols);
-    ui.move(ui.rows-1, 1);
+    ui.move(ui.rows-1, 0);
+    ui.addch(if (main.config.show_blocks) '*' else ' ');
     ui.style(if (main.config.show_blocks) .bold_hd else .hd);
     ui.addstr("Total disk usage: ");
     ui.addsize(.hd, util.blocksToSize(dir_parent.entry.pack.blocks));
     ui.style(if (main.config.show_blocks) .hd else .bold_hd);
-    ui.addstr("  Apparent size: ");
+    ui.addstr("  ");
+    ui.addch(if (main.config.show_blocks) ' ' else '*');
+    ui.addstr("Apparent size: ");
     ui.addsize(.hd, dir_parent.entry.size);
-    ui.addstr("  Items: ");
+    ui.addstr("   Items: ");
     ui.addnum(.hd, dir_parent.items);
 
     switch (state) {
