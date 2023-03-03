@@ -289,15 +289,18 @@ void browse_draw(void) {
   mvhline(winrows-1, 0, ' ', wincols);
   if(t) {
     if(!show_as) attron(A_BOLD);
-    mvaddstr(winrows-1, 0, " Total disk usage: ");
+    mvaddchc(UIC_HD, winrows-1, 0, show_as ? ' ' : '*');
+    addstr("Total disk usage: ");
     if(!show_as) attroff(A_BOLD);
     printsize(UIC_HD, t->parent->size);
     if(show_as) attron(A_BOLD);
-    addstrc(UIC_HD, "  Apparent size: ");
+    addstrc(UIC_HD, "  ");
+    addchc(UIC_HD, show_as ? '*' : ' ');
+    addstrc(UIC_HD, "Apparent size: ");
     if(show_as) attroff(A_BOLD);
     uic_set(UIC_NUM_HD);
     printsize(UIC_HD, t->parent->asize);
-    addstrc(UIC_HD, "  Items: ");
+    addstrc(UIC_HD, "   Items: ");
     uic_set(UIC_NUM_HD);
     printw("%d", t->parent->items);
   } else
