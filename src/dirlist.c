@@ -39,7 +39,8 @@ int64_t dirlist_maxs       = 0,
 int    dirlist_sort_desc   = 1,
        dirlist_sort_col    = DL_COL_SIZE,
        dirlist_sort_df     = 0,
-       dirlist_hidden      = 0;
+       dirlist_hidden      = 0,
+       dirlist_natsort     = 1;
 
 /* private state vars */
 static struct dir *parent_alloc, *head, *head_real, *selected, *top = NULL;
@@ -80,7 +81,7 @@ static int dirlist_cmp(struct dir *x, struct dir *y) {
    *
    * Note that the method used below is supposed to be fast, not readable :-)
    */
-#define CMP_NAME  strnatcmp(x->name, y->name)
+#define CMP_NAME  (dirlist_natsort ? strnatcmp(x->name, y->name) : strcmp(x->name, y->name))
 #define CMP_SIZE  (x->size  > y->size  ? 1 : (x->size  == y->size  ? 0 : -1))
 #define CMP_ASIZE (x->asize > y->asize ? 1 : (x->asize == y->asize ? 0 : -1))
 #define CMP_ITEMS (x->items > y->items ? 1 : (x->items == y->items ? 0 : -1))

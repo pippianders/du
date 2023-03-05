@@ -219,6 +219,8 @@ static int arg_option(void) {
   else if(OPT("--hide-percent")) graph &= 1;
   else if(OPT("--group-directories-first")) dirlist_sort_df = 1;
   else if(OPT("--no-group-directories-first")) dirlist_sort_df = 0;
+  else if(OPT("--enable-natsort")) dirlist_natsort = 1;
+  else if(OPT("--disable-natsort")) dirlist_natsort = 0;
   else if(OPT("--sort")) {
     arg = ARG;
     tmp = strrchr(arg, '-');
