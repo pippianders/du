@@ -252,6 +252,10 @@ The column can be suffixed with I<-asc> or I<-desc> to set the order to
 ascending or descending, respectively. e.g. C<--sort=name-desc> will sort by
 name in descending order.
 
+=item B<--enable-natsort>, B<--disable-natsort>
+
+Enable (default) or disable natural sort when sorting by file name.
+
 =item B<--group-directories-first>, B<--no-group-directories-first>
 
 Sort (or not) directories before files.

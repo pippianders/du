@@ -66,6 +66,7 @@ pub const config = struct {
     pub var sort_col: SortCol = .blocks;
     pub var sort_order: SortOrder = .desc;
     pub var sort_dirsfirst: bool = false;
+    pub var sort_natural: bool = true;
 
     pub var imported: bool = false;
     pub var can_delete: ?bool = null;
@@ -183,6 +184,8 @@ fn argConfig(args: *Args, opt: Args.Option) bool {
     else if (opt.is("--hide-percent")) config.show_percent = false
     else if (opt.is("--group-directories-first")) config.sort_dirsfirst = true
     else if (opt.is("--no-group-directories-first")) config.sort_dirsfirst = false
+    else if (opt.is("--enable-natsort")) config.sort_natural = true
+    else if (opt.is("--disable-natsort")) config.sort_natural = false
     else if (opt.is("--graph-style")) {
         const val = args.arg();
         if (std.mem.eql(u8, val, "hash")) config.graph_style = .hash

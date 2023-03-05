@@ -103,10 +103,10 @@ fn sortLt(_: void, ap: ?*model.Entry, bp: ?*model.Entry) bool {
         },
     }
 
-    const an = a.name();
-    const bn = b.name();
-    return if (main.config.sort_order == .asc) util.strnatcmp(an, bn) == .lt
-           else util.strnatcmp(bn, an) == .lt;
+    const an = (if (main.config.sort_order == .asc) a else b).name();
+    const bn = (if (main.config.sort_order == .asc) b else a).name();
+    return if (main.config.sort_natural) util.strnatcmp(an, bn) == .lt
+           else std.mem.lessThan(u8, an, bn);
 }
 
 // Should be called when:
