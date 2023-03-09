@@ -4,6 +4,8 @@
 # Optional semi-standard Makefile with some handy tools.
 # Ncdu itself can be built with just the zig build system.
 
+ZIG ?= zig
+
 PREFIX ?= /usr/local
 BINDIR ?= ${PREFIX}/bin
 MANDIR ?= ${PREFIX}/share/man/man1
@@ -11,11 +13,14 @@ ZIG_FLAGS ?= -Drelease-fast
 
 NCDU_VERSION=$(shell grep 'program_version = "' src/main.zig | sed -e 's/^.*"\(.\+\)".*$$/\1/')
 
+.PHONY: build
+build: release doc
+
 release:
-	zig build ${ZIG_FLAGS}
+	$(ZIG) build ${ZIG_FLAGS}
 
 debug:
-	zig build
+	$(ZIG) build
 
 clean:
 	rm -rf zig-cache zig-out
